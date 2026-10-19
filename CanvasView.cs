@@ -420,21 +420,31 @@ sealed class CanvasView : FrameworkElement
 
         var tool = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? Tool.Select : _tool;
 
+        // handles of the selected object work with any tool
+        var (m, idx) = HitHandle(p);
+        if (m != Mode.None)
+        {
+            mode = m; handle = idx; startWorld = p;
+            BeginEdit();
+            grab = m == Mode.Scale ? WorldHandles(Selected!)[idx] - p : new Vector();
+            if (m == Mode.Rotate)
+            {
+                var pv = PivotPoint;
+                startAngle = Math.Atan2(p.Y - pv.Y, p.X - pv.X);
+            }
+            CaptureMouse(); return;
+        }
+
+        // a drawing tool: pressing on the selected object itself moves it; anywhere else starts a new shape
+        if (tool != Tool.Select && tool != Tool.Text && Selected != null && Selected.Hit(p, 6 * S))
+        {
+            wasSelected = true;
+            BeginEdit(); mode = Mode.Move; last = p; CaptureMouse();
+            return;
+        }
+
         if (tool == Tool.Select)
         {
-            var (m, idx) = HitHandle(p);
-            if (m != Mode.None)
-            {
-                mode = m; handle = idx; startWorld = p;
-                BeginEdit();
-                grab = m == Mode.Scale ? WorldHandles(Selected!)[idx] - p : new Vector();
-                if (m == Mode.Rotate)
-                {
-                    var pv = PivotPoint;
-                    startAngle = Math.Atan2(p.Y - pv.Y, p.X - pv.X);
-                }
-                CaptureMouse(); return;
-            }
             var hit = HitItem(p);
             wasSelected = hit != null && hit == Selected;
             Select(hit);
@@ -512,10 +522,7 @@ sealed class CanvasView : FrameworkElement
             {
                 PushUndo(pending!);
                 Items.Add(cur);
-                var done = cur;
-                _tool = Tool.Select; Cursor = Cursors.Arrow;
-                Select(done);
-                ToolChanged?.Invoke(Tool.Select);
+                Select(cur);   // stays selected for restyling; the drawing tool stays active
             }
             cur = null;
         }
@@ -535,14 +542,16 @@ sealed class CanvasView : FrameworkElement
             Cursor = ch >= 0 ? HandleCursor(ch) : crop.Contains(p) ? Cursors.SizeAll : Cursors.Arrow;
             return;
         }
-        if (_tool != Tool.Select && !Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return;
+        bool selectLike = _tool == Tool.Select || Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
         var (m, i) = HitHandle(p);
         Cursor = m switch
         {
             Mode.Rotate or Mode.Pivot => Cursors.Hand,
             Mode.Endpoint => Cursors.Cross,
             Mode.Scale => HandleCursor(i),
-            _ => HitItem(p) != null ? Cursors.SizeAll : Cursors.Arrow,
+            _ when selectLike => HitItem(p) != null ? Cursors.SizeAll : Cursors.Arrow,
+            _ when _tool != Tool.Text && Selected != null && Selected.Hit(p, 6 * S) => Cursors.SizeAll,
+            _ => _tool == Tool.Crop ? Cursors.Arrow : Cursors.Cross,
         };
     }
 
