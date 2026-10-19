@@ -32,10 +32,12 @@ sealed class CanvasView : FrameworkElement
     public Color CurColor = Colors.Red;
     public double CurW = 4;
     public int CurTextBg;
+    public int CurArrowStyle;
 
     public event Action? Changed;
     public event Action<Ann?>? SelectionChanged;
     public event Action<TextAnn?, Point>? TextRequested;
+    public event Action<Tool>? ToolChanged;
 
     Tool _tool = Tool.Arrow;
     Mode mode;
@@ -43,6 +45,7 @@ sealed class CanvasView : FrameworkElement
     Point last, startWorld;
     Point? pivot;
     double startAngle;
+    Vector grab;
     int handle;
     bool wasSelected, moved;
     List<Ann>? pending;
@@ -116,9 +119,8 @@ sealed class CanvasView : FrameworkElement
             dc.DrawLine(cross, new Point(c.X - 4 * S, c.Y + 4 * S), new Point(c.X + 4 * S, c.Y - 4 * S));
             foreach (var h in hw)
                 dc.DrawRectangle(Brushes.White, pen, new Rect(h.X - hs, h.Y - hs, hs * 2, hs * 2));
-            if (a.HasEndpoints)
-                foreach (var e in new[] { a.ToWorld(a.A), a.ToWorld(a.B) })
-                    dc.DrawEllipse(accent, new Pen(Brushes.White, S), e, 5 * S, 5 * S);
+            foreach (var nd in a.Nodes())
+                dc.DrawEllipse(accent, new Pen(Brushes.White, S), a.ToWorld(nd), 5 * S, 5 * S);
         }
         else
         {
@@ -202,13 +204,28 @@ sealed class CanvasView : FrameworkElement
         InvalidateVisual();
     }
 
+    Ann? lastStyled; DateTime lastStyleAt;
+
     public void StyleSelected(Color? color, double? w)
     {
         if (Selected == null) return;
-        PushUndo(Snapshot());
+        var now = DateTime.UtcNow;
+        if (lastStyled != Selected || (now - lastStyleAt).TotalMilliseconds > 700) PushUndo(Snapshot());
+        lastStyled = Selected; lastStyleAt = now;
         if (color is { } c) Selected.Color = c;
         if (w is { } ww) Selected.W = ww;
         InvalidateVisual();
+    }
+
+    public void SetArrowStyle(int style)
+    {
+        CurArrowStyle = style;
+        if (Selected is ArrowAnn t && t.Style != style)
+        {
+            PushUndo(Snapshot());
+            t.Style = style;
+            InvalidateVisual();
+        }
     }
 
     public void SetTextBg(int bg)
@@ -275,11 +292,9 @@ sealed class CanvasView : FrameworkElement
                 if ((p - hw[i]).Length <= 10 * S) return (Mode.Rotate, i);
             return (Mode.None, -1);
         }
-        if (a.HasEndpoints)
-        {
-            if ((p - a.ToWorld(a.A)).Length <= 8 * S) return (Mode.Endpoint, 0);
-            if ((p - a.ToWorld(a.B)).Length <= 8 * S) return (Mode.Endpoint, 1);
-        }
+        var nodes = a.Nodes();
+        for (int i = nodes.Length - 1; i >= 0; i--)
+            if ((p - a.ToWorld(nodes[i])).Length <= 8 * S) return (Mode.Endpoint, i);
         for (int i = 0; i < 8; i++)
             if ((p - hw[i]).Length <= 7 * S) return (Mode.Scale, i);
         return (Mode.None, -1);
@@ -308,6 +323,7 @@ sealed class CanvasView : FrameworkElement
             {
                 mode = m; handle = idx; startWorld = p;
                 BeginEdit();
+                grab = m == Mode.Scale ? WorldHandles(Selected!)[idx] - p : new Vector();
                 if (m == Mode.Rotate)
                 {
                     var pv = PivotPoint;
@@ -335,7 +351,7 @@ sealed class CanvasView : FrameworkElement
         pending = Snapshot();
         cur = tool switch
         {
-            Tool.Arrow => new ArrowAnn(),
+            Tool.Arrow => new ArrowAnn { Style = CurArrowStyle },
             Tool.Line => new LineAnn(),
             Tool.Ellipse => new EllipseAnn(),
             _ => new RectAnn(),
@@ -387,6 +403,10 @@ sealed class CanvasView : FrameworkElement
             {
                 PushUndo(pending!);
                 Items.Add(cur);
+                var done = cur;
+                _tool = Tool.Select; Cursor = Cursors.Arrow;
+                Select(done);
+                ToolChanged?.Invoke(Tool.Select);
             }
             cur = null;
         }
@@ -426,19 +446,13 @@ sealed class CanvasView : FrameworkElement
         var d = Dirs[handle];
         var anchor = shift ? new Point(g.X + g.Width / 2, g.Y + g.Height / 2)
                            : new Point(g.X + (1 - d.X) / 2 * g.Width, g.Y + (1 - d.Y) / 2 * g.Height);
-        var pl = o.ToLocal(p);
+        var pl = o.ToLocal(p + grab);
         double pad = Pad(o);
         double tx = pl.X - d.X * pad, ty = pl.Y - d.Y * pad;
         double hx = g.X + (d.X + 1) / 2 * g.Width, hy = g.Y + (d.Y + 1) / 2 * g.Height;
         double sx = double.NaN, sy = double.NaN;
         if (d.X != 0 && Math.Abs(hx - anchor.X) > 0.5) sx = (tx - anchor.X) / (hx - anchor.X);
         if (d.Y != 0 && Math.Abs(hy - anchor.Y) > 0.5) sy = (ty - anchor.Y) / (hy - anchor.Y);
-        bool corner = d.X != 0 && d.Y != 0;
-        if (corner)   // corners scale proportionally (as in CorelDRAW)
-        {
-            double u = double.IsNaN(sx) ? sy : double.IsNaN(sy) ? sx : Math.Max(sx, sy);
-            sx = sy = u;
-        }
         sx = double.IsNaN(sx) ? 1 : Math.Max(sx, 0.03);
         sy = double.IsNaN(sy) ? 1 : Math.Max(sy, 0.03);
 
@@ -451,11 +465,19 @@ sealed class CanvasView : FrameworkElement
     void DoEndpoint(Point p, bool shift)
     {
         var o = orig!;
-        var other = handle == 0 ? o.B : o.A;
-        var pl = Constrain(other, o.ToLocal(p), shift, false);
         var t = o.Clone();
-        if (handle == 0) t.A = pl; else t.B = pl;
-        Pin(t, other, o.ToWorld(other));
+        var pl = o.ToLocal(p);
+        if (handle < 2)
+        {
+            var other = handle == 0 ? o.B : o.A;
+            t.SetNode(handle, Constrain(other, pl, shift, false));
+            Pin(t, other, o.ToWorld(other));
+        }
+        else
+        {
+            t.SetNode(handle, pl);
+            Pin(t, o.A, o.ToWorld(o.A));
+        }
         Selected!.Assign(t);
     }
 

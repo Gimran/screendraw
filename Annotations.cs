@@ -21,7 +21,9 @@ abstract class Ann
     public abstract Rect GeomBox();
     public abstract Ann Clone();
     public abstract void ScaleAbout(Point anchor, double sx, double sy);
-    public virtual bool HasEndpoints => false;
+    /// <summary>Draggable nodes in local coordinates (line/arrow ends, curve mid point).</summary>
+    public virtual Point[] Nodes() => Array.Empty<Point>();
+    public virtual void SetNode(int i, Point local) { }
 
     public virtual void Assign(Ann o) { Color = o.Color; W = o.W; A = o.A; B = o.B; Rot = o.Rot; }
 
@@ -73,35 +75,136 @@ sealed class LineAnn : Ann
     public override Rect GeomBox() => new(A, B);
     public override Ann Clone() => CopyTo(new LineAnn());
     public override void ScaleAbout(Point anchor, double sx, double sy) => ScaleAB(anchor, sx, sy);
-    public override bool HasEndpoints => true;
+    public override Point[] Nodes() => new[] { A, B };
+    public override void SetNode(int i, Point p) { if (i == 0) A = p; else B = p; }
 }
 
 sealed class ArrowAnn : Ann
 {
-    protected override void DrawLocal(DrawingContext dc)
+    public int Style;                 // 0 plain, 1 tapered, 2 dotted (curved)
+    public double MidU = 0.5, MidV;   // curve mid point in chord-relative coordinates
+
+    Point Mid()
     {
-        var dir = B - A;
-        if (dir.Length < 1) return;
-        dir.Normalize();
-        double head = W * 3.5 + 8;
-        dc.DrawLine(MakePen(), A, B - dir * head * 0.8);
-        var n = new Vector(-dir.Y, dir.X) * head * 0.42;
+        var ab = B - A; double len = ab.Length;
+        if (len < 1e-6) return A;
+        var n = new Vector(-ab.Y, ab.X) / len;
+        return A + ab * MidU + n * (MidV * len);
+    }
+
+    void SetMid(Point m)
+    {
+        var ab = B - A; double len2 = ab.LengthSquared;
+        if (len2 < 1e-6) return;
+        double len = Math.Sqrt(len2);
+        var n = new Vector(-ab.Y, ab.X) / len;
+        var d = m - A;
+        MidU = (d * ab) / len2;
+        MidV = (d * n) / len;
+    }
+
+    Point Ctrl() { var m = Mid(); return new Point(2 * m.X - (A.X + B.X) / 2, 2 * m.Y - (A.Y + B.Y) / 2); }
+
+    Point[] Curve(int n)
+    {
+        var c = Style == 2 ? Ctrl() : new Point((A.X + B.X) / 2, (A.Y + B.Y) / 2);
+        var pts = new Point[n + 1];
+        for (int i = 0; i <= n; i++)
+        {
+            double t = (double)i / n, u = 1 - t;
+            pts[i] = new Point(u * u * A.X + 2 * u * t * c.X + t * t * B.X, u * u * A.Y + 2 * u * t * c.Y + t * t * B.Y);
+        }
+        return pts;
+    }
+
+    static void Head(DrawingContext dc, Color color, Point tip, Vector dir, double len, double halfW)
+    {
+        var n = new Vector(-dir.Y, dir.X) * halfW;
         var g = new StreamGeometry();
         using (var c = g.Open())
         {
-            c.BeginFigure(B, true, true);
-            c.LineTo(B - dir * head + n, true, false);
-            c.LineTo(B - dir * head - n, true, false);
+            c.BeginFigure(tip, true, true);
+            c.LineTo(tip - dir * len + n, true, false);
+            c.LineTo(tip - dir * len - n, true, false);
         }
         g.Freeze();
-        var brush = new SolidColorBrush(Color);
+        var brush = new SolidColorBrush(color);
         dc.DrawGeometry(brush, new Pen(brush, 1) { LineJoin = PenLineJoin.Round }, g);
     }
-    public override bool HitLocal(Point p, double tol) => DistToSegment(p, A, B) <= W / 2 + tol;
-    public override Rect GeomBox() => new(A, B);
+
+    protected override void DrawLocal(DrawingContext dc)
+    {
+        var ab = B - A;
+        if (ab.Length < 1) return;
+        var brush = new SolidColorBrush(Color);
+        if (Style == 1)          // tapered: thin tail growing into a big head
+        {
+            var dir = ab; dir.Normalize();
+            var n = new Vector(-dir.Y, dir.X);
+            double head = W * 4 + 10, neck = W * 0.9 + 1, tail = Math.Max(W * 0.12, 0.5);
+            double hl = Math.Min(head, ab.Length * 0.8);
+            var baseP = B - dir * hl * 0.85;
+            var g = new StreamGeometry();
+            using (var c = g.Open())
+            {
+                c.BeginFigure(A + n * tail, true, true);
+                c.LineTo(baseP + n * neck, true, false);
+                c.LineTo(baseP - n * neck, true, false);
+                c.LineTo(A - n * tail, true, false);
+            }
+            g.Freeze();
+            dc.DrawGeometry(brush, new Pen(brush, 1) { LineJoin = PenLineJoin.Round }, g);
+            Head(dc, Color, B, dir, hl, hl * 0.5);
+        }
+        else if (Style == 2)     // dotted curve
+        {
+            var pts = Curve(80);
+            double total = 0; var cum = new double[pts.Length];
+            for (int i = 1; i < pts.Length; i++) { total += (pts[i] - pts[i - 1]).Length; cum[i] = total; }
+            double head = W * 3.5 + 8, r = Math.Max(W * 0.85, 1.5), step = r * 3.4;
+            var tip = B - Ctrl(); if (tip.Length < 1e-6) tip = ab; tip.Normalize();
+            int k = 1;
+            for (double s = 0; s <= total - head * 0.9; s += step)
+            {
+                while (k < pts.Length - 1 && cum[k] < s) k++;
+                double seg = cum[k] - cum[k - 1], f = seg < 1e-9 ? 0 : (s - cum[k - 1]) / seg;
+                dc.DrawEllipse(brush, null, pts[k - 1] + (pts[k] - pts[k - 1]) * f, r, r);
+            }
+            Head(dc, Color, B, tip, head, head * 0.42);
+        }
+        else                     // plain
+        {
+            var dir = ab; dir.Normalize();
+            double head = W * 3.5 + 8;
+            dc.DrawLine(MakePen(), A, B - dir * head * 0.8);
+            Head(dc, Color, B, dir, head, head * 0.42);
+        }
+    }
+
+    public override bool HitLocal(Point p, double tol)
+    {
+        var pts = Curve(Style == 2 ? 40 : 1);
+        double w = Style == 0 ? W / 2 : Math.Max(W, 6);
+        for (int i = 1; i < pts.Length; i++)
+            if (DistToSegment(p, pts[i - 1], pts[i]) <= w + tol) return true;
+        return false;
+    }
+
+    public override Rect GeomBox() { var r = new Rect(A, B); if (Style == 2) r.Union(Mid()); return r; }
     public override Ann Clone() => CopyTo(new ArrowAnn());
-    public override void ScaleAbout(Point anchor, double sx, double sy) => ScaleAB(anchor, sx, sy);
-    public override bool HasEndpoints => true;
+    public override void Assign(Ann o)
+    {
+        base.Assign(o);
+        if (o is ArrowAnn t) { Style = t.Style; MidU = t.MidU; MidV = t.MidV; }
+    }
+    public override void ScaleAbout(Point anchor, double sx, double sy)
+    {
+        var m = ScalePt(Mid(), anchor, sx, sy);
+        ScaleAB(anchor, sx, sy);
+        if (Style == 2) SetMid(m);
+    }
+    public override Point[] Nodes() => Style == 2 ? new[] { A, B, Mid() } : new[] { A, B };
+    public override void SetNode(int i, Point p) { if (i == 0) A = p; else if (i == 1) B = p; else SetMid(p); }
 }
 
 sealed class RectAnn : Ann

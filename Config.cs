@@ -14,6 +14,7 @@ sealed class Config
     public string Color { get; set; } = "#E5483B";
     public double Width { get; set; } = 4;
     public int TextBg { get; set; } = 0;
+    public int ArrowStyle { get; set; } = 0;
     public bool CopyOnSave { get; set; } = true;
     public bool CloseAfter { get; set; } = false;
     public bool Autostart { get; set; } = false;

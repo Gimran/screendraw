@@ -101,6 +101,9 @@ sealed class EditorWindow : Window
     TextAnn? editing;
     Point editPos;
 
+    readonly List<(int v, ToggleButton b)> arrowButtons = new();
+    FrameworkElement arrowGroup = null!, textGroup = null!;
+
     public EditorWindow(BitmapSource image, double dpiScale, Config cfg)
     {
         this.cfg = cfg;
@@ -110,7 +113,6 @@ sealed class EditorWindow : Window
         Topmost = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SizeToContent = SizeToContent.WidthAndHeight;
-        MinWidth = 900;
         var wa = SystemParameters.WorkArea;
         MaxWidth = wa.Width; MaxHeight = wa.Height;
 
@@ -118,15 +120,27 @@ sealed class EditorWindow : Window
         {
             CurColor = (Color)ColorConverter.ConvertFromString(cfg.Color),
             CurW = cfg.Width,
+            CurTextBg = cfg.TextBg,
+            CurArrowStyle = cfg.ArrowStyle,
         };
         view.Changed += RefreshUndo;
         view.TextRequested += BeginText;
+        view.ToolChanged += t => { SetToolButtons(t); UpdateContext(); };
+        view.SelectionChanged += a =>
+        {
+            if (a is TextAnn ta) { view.CurTextBg = ta.Bg; RefreshBg(ta.Bg); }
+            if (a is ArrowAnn aa) { view.CurArrowStyle = aa.Style; RefreshArrow(aa.Style); }
+            UpdateContext();
+        };
 
         var iconToggle = (Style)Resources["IconToggle"];
         var iconButton = (Style)Resources["IconButton"];
+        var dim = Theme.Brush(Color.FromRgb(0xAA, 0xAA, 0xAA));
 
-        var bar = new WrapPanel { Margin = new Thickness(8, 6, 8, 6) };
-        void Add(UIElement el, double right = 4) { if (el is FrameworkElement f) f.Margin = new Thickness(0, 2, right, 2); bar.Children.Add(el); }
+        WrapPanel Row() => new() { Margin = new Thickness(8, 3, 8, 3) };
+        var row1 = Row();
+        var row2 = Row();
+        void Add(Panel row, UIElement el, double right = 4) { if (el is FrameworkElement f) f.Margin = new Thickness(0, 2, right, 2); row.Children.Add(el); }
 
         object Label(UIElement icon, string text) => new StackPanel
         {
@@ -134,6 +148,7 @@ sealed class EditorWindow : Window
             Children = { icon, new TextBlock { Text = text, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Text) } },
         };
 
+        // ---- row 1: primitives
         foreach (var (tool, icon, label, tip) in new (Tool, UIElement, string, string)[] {
             (Tool.Select, Theme.CursorIcon(), "Выбор", "Выбрать и преобразовать (V). Клик по выбранному — режим поворота. Ctrl — временно"),
             (Tool.Arrow, Theme.Icon("arrow"), "Стрелка", "A"),
@@ -145,19 +160,30 @@ sealed class EditorWindow : Window
             var t = tool;
             var b = new ToggleButton { Content = Label(icon, label), ToolTip = tip, Style = iconToggle, Focusable = false };
             b.Click += (_, _) => SetTool(t);
-            toolButtons[tool] = b; Add(b, 2);
+            toolButtons[tool] = b; Add(row1, b, 2);
         }
-        Add(new TextBlock { Text = "Фон текста", Margin = new Thickness(8, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Color.FromRgb(0xAA, 0xAA, 0xAA)) }, 0);
+
+        // ---- row 2: options (arrow style / text background, colour, thickness, undo)
+        var ag = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
+        foreach (var (v, icon, tip) in new[] { (0, "arrow_normal", "Обычная стрелка"), (1, "arrow_taper", "Сужающаяся стрелка"), (2, "arrow_dots", "Пунктирная изогнутая стрелка (средний узел — изгиб)") })
+        {
+            var vv = v;
+            var b = new ToggleButton { Content = Theme.Icon(icon), ToolTip = tip, Style = iconToggle, Focusable = false, Padding = new Thickness(6, 5, 6, 5) };
+            b.Click += (_, _) => { view.SetArrowStyle(vv); cfg.ArrowStyle = vv; cfg.Save(); RefreshArrow(vv); };
+            arrowButtons.Add((v, b)); ag.Children.Add(b);
+        }
+        arrowGroup = ag; row2.Children.Add(ag);
+
+        var tg = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
+        tg.Children.Add(new TextBlock { Text = "Фон текста", Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = dim });
         foreach (var (v, tip) in new[] { (1, "Светлый фон"), (2, "Тёмный фон"), (0, "Без фона") })
         {
             var vv = v;
             var b = new ToggleButton { Content = Theme.BgIcon(v), ToolTip = tip, Style = iconToggle, Focusable = false, Padding = new Thickness(5) };
             b.Click += (_, _) => { view.SetTextBg(vv); cfg.TextBg = vv; cfg.Save(); RefreshBg(vv); };
-            bgButtons.Add((v, b)); Add(b, 2);
+            bgButtons.Add((v, b)); tg.Children.Add(b);
         }
-        view.CurTextBg = cfg.TextBg; RefreshBg(cfg.TextBg);
-        view.SelectionChanged += a => { if (a is TextAnn t) { view.CurTextBg = t.Bg; RefreshBg(t.Bg); } };
-        Add(new Border { Width = 12 }, 0);
+        textGroup = tg; row2.Children.Add(tg);
 
         foreach (var hex in Palette)
         {
@@ -168,7 +194,7 @@ sealed class EditorWindow : Window
                 Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)),
             };
             sw.MouseLeftButtonUp += (_, _) => SetColor(h);
-            swatches.Add((hex, sw)); Add(sw, 6);
+            swatches.Add((hex, sw)); Add(row2, sw, 6);
         }
         var more = new Button { Content = new TextBlock { Text = "…", Foreground = Theme.Brush(Theme.Text) }, ToolTip = "Другой цвет", Width = 26, Style = iconButton, Focusable = false };
         more.Click += (_, _) =>
@@ -177,14 +203,14 @@ sealed class EditorWindow : Window
             if (d.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                 SetColor($"#{d.Color.R:X2}{d.Color.G:X2}{d.Color.B:X2}");
         };
-        Add(more, 10);
+        Add(row2, more, 10);
 
         foreach (var (w, icon, tip) in new[] { (2.0, "thin", "Тонкая"), (5.0, "mid", "Средняя"), (10.0, "thick", "Толстая") })
         {
             var ww = w;
             var b = new ToggleButton { Content = Theme.Icon(icon), ToolTip = tip, Style = iconToggle, Focusable = false, Padding = new Thickness(6) };
             b.Click += (_, _) => { width.Value = ww; };
-            presets.Add((w, b)); Add(b, 2);
+            presets.Add((w, b)); Add(row2, b, 2);
         }
         width.Value = cfg.Width; widthLbl.Text = cfg.Width.ToString("0");
         width.ValueChanged += (_, e) =>
@@ -194,25 +220,36 @@ sealed class EditorWindow : Window
             foreach (var (pw, pb) in presets) pb.IsChecked = Math.Abs(pw - e.NewValue) < 0.01;
             view.StyleSelected(null, e.NewValue);
         };
-        Add(width, 0); Add(widthLbl, 10);
+        Add(row2, width, 0); Add(row2, widthLbl, 10);
         foreach (var (pw, pb) in presets) pb.IsChecked = Math.Abs(pw - cfg.Width) < 0.01;
 
         undoBtn = new Button { Content = Theme.Icon("undo"), ToolTip = "Отменить (Ctrl+Z)", Style = iconButton, Focusable = false };
         redoBtn = new Button { Content = Theme.Icon("redo"), ToolTip = "Повторить (Ctrl+Y)", Style = iconButton, Focusable = false };
         undoBtn.Click += (_, _) => view.Undo(); redoBtn.Click += (_, _) => view.Redo();
-        Add(undoBtn, 2); Add(redoBtn, 14);
+        Add(row2, undoBtn, 2); Add(row2, redoBtn, 0);
 
+        var line = Theme.Brush(Color.FromRgb(0x3A, 0x3A, 0x3A));
+        var toolbar = new StackPanel { Children = { row1, row2 } };
+        var toolbarBox = new Border { Background = Theme.Brush(Theme.Surface), BorderBrush = line, BorderThickness = new Thickness(0, 0, 0, 1), Child = toolbar };
+
+        // ---- bottom bar: status + actions
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
         foreach (var (text, tip, act) in new (string, string, Action)[] {
             ("Копировать", "Ctrl+C", Copy), ("Сохранить", "Ctrl+S", Save), ("Сохранить как…", "Ctrl+Shift+S", SaveAs) })
         {
-            var b = new Button { Content = text, ToolTip = tip, Padding = new Thickness(12, 4, 12, 4), Focusable = false };
+            var b = new Button { Content = text, ToolTip = tip, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(6, 6, 0, 6), Focusable = false };
             b.Click += (_, _) => act();
-            Add(b, 4);
+            actions.Children.Add(b);
         }
+        var bottom = new Grid { Background = Theme.Brush(Theme.Surface) };
+        bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        status.VerticalAlignment = VerticalAlignment.Center; status.TextTrimming = TextTrimming.CharacterEllipsis;
+        Grid.SetColumn(actions, 1);
+        bottom.Children.Add(status); bottom.Children.Add(actions);
+        var bottomBox = new Border { BorderBrush = line, BorderThickness = new Thickness(0, 1, 0, 0), Child = bottom };
 
-        var toolbar = new Border { Background = Theme.Brush(Theme.Surface), BorderBrush = Theme.Brush(Color.FromRgb(0x3A, 0x3A, 0x3A)), BorderThickness = new Thickness(0, 0, 0, 1), Child = bar };
-
-        var stage = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12) };
+        var stage = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8) };
         stage.Children.Add(view);
         stage.Children.Add(overlay);
         var scroll = new ScrollViewer
@@ -222,16 +259,42 @@ sealed class EditorWindow : Window
         };
 
         var root = new DockPanel();
-        DockPanel.SetDock(toolbar, Dock.Top); root.Children.Add(toolbar);
-        var statusBar = new Border { Background = Theme.Brush(Theme.Surface), Child = status };
-        DockPanel.SetDock(statusBar, Dock.Bottom); root.Children.Add(statusBar);
+        DockPanel.SetDock(toolbarBox, Dock.Top); root.Children.Add(toolbarBox);
+        DockPanel.SetDock(bottomBox, Dock.Bottom); root.Children.Add(bottomBox);
         root.Children.Add(scroll);
         Content = root;
 
+        // window is at least as wide as the widest toolbar row, otherwise it hugs the captured area
+        // the arrow-style and text-background groups are never shown together, so measure each separately
+        double need = 0;
+        foreach (var (ag2, tg2) in new[] { (Visibility.Visible, Visibility.Collapsed), (Visibility.Collapsed, Visibility.Visible) })
+        {
+            arrowGroup.Visibility = ag2; textGroup.Visibility = tg2;
+            foreach (var r in new[] { row1, row2 })
+            {
+                r.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                need = Math.Max(need, r.DesiredSize.Width);
+            }
+        }
+        MinWidth = need + 24;
+        bottom.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        MinWidth = Math.Max(MinWidth, bottom.DesiredSize.Width + 24);
+
         SetTool(Tool.Arrow);
         SetColor(cfg.Color, apply: false);
+        RefreshBg(cfg.TextBg); RefreshArrow(cfg.ArrowStyle);
         RefreshUndo();
     }
+
+    void SetToolButtons(Tool t) { foreach (var (k, b) in toolButtons) b.IsChecked = k == t; }
+
+    void UpdateContext()
+    {
+        arrowGroup.Visibility = view.Tool == Tool.Arrow || view.Selected is ArrowAnn ? Visibility.Visible : Visibility.Collapsed;
+        textGroup.Visibility = view.Tool == Tool.Text || view.Selected is TextAnn ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void RefreshArrow(int v) { foreach (var (av, ab) in arrowButtons) ab.IsChecked = av == v; }
 
     public void AddSamples()
     {
@@ -239,6 +302,8 @@ sealed class EditorWindow : Window
         view.Items.Add(new RectAnn { Color = Colors.DodgerBlue, W = 3, A = new Point(60, 150), B = new Point(220, 230), Rot = 20 });
         view.Items.Add(new EllipseAnn { Color = Colors.Orange, W = 3, A = new Point(300, 150), B = new Point(420, 230) });
         view.Items.Add(new TextAnn { Color = Colors.LimeGreen, W = 4, A = new Point(240, 40), B = new Point(240, 40), Text = "Привет", Rot = -10, Bg = 1 });
+        view.Items.Add(new ArrowAnn { Color = Colors.Red, W = 4, Style = 1, A = new Point(40, 260), B = new Point(260, 200) });
+        view.Items.Add(new ArrowAnn { Color = Colors.Red, W = 4, Style = 2, A = new Point(300, 280), B = new Point(470, 240), MidU = 0.5, MidV = -0.3 });
         view.Select(view.Items[1]);
         SetTool(Tool.Select);
     }
@@ -248,7 +313,8 @@ sealed class EditorWindow : Window
     {
         CommitText();
         view.Tool = t;
-        foreach (var (k, b) in toolButtons) b.IsChecked = k == t;
+        SetToolButtons(t);
+        UpdateContext();
     }
 
     void SetColor(string hex, bool apply = true)
