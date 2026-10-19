@@ -103,6 +103,7 @@ sealed class EditorWindow : Window
 
     readonly List<(int v, ToggleButton b)> arrowButtons = new();
     FrameworkElement arrowGroup = null!, textGroup = null!;
+    Border cropBar = null!;
 
     public EditorWindow(BitmapSource image, double dpiScale, Config cfg)
     {
@@ -125,6 +126,7 @@ sealed class EditorWindow : Window
         };
         view.Changed += RefreshUndo;
         view.TextRequested += BeginText;
+        view.ImageChanged += FitWindow;
         view.ToolChanged += t => { SetToolButtons(t); UpdateContext(); };
         view.SelectionChanged += a =>
         {
@@ -155,7 +157,10 @@ sealed class EditorWindow : Window
             (Tool.Line, Theme.Icon("line"), "Линия", "L"),
             (Tool.Rect, Theme.Icon("rect"), "Рамка", "R"),
             (Tool.Ellipse, Theme.Icon("ellipse"), "Овал", "O"),
-            (Tool.Text, Theme.Icon("text"), "Текст", "T") })
+            (Tool.Text, Theme.Icon("text"), "Текст", "T"),
+            (Tool.Marker, Theme.Icon("marker"), "Маркер", "Выделитель (M)"),
+            (Tool.Blur, Theme.Icon("blur"), "Размыть", "Пикселизация области (B)"),
+            (Tool.Crop, Theme.Icon("crop"), "Обрезать", "Обрезка (C). Enter — применить, Esc — отмена") })
         {
             var t = tool;
             var b = new ToggleButton { Content = Label(icon, label), ToolTip = tip, Style = iconToggle, Focusable = false };
@@ -232,6 +237,17 @@ sealed class EditorWindow : Window
         var toolbar = new StackPanel { Children = { row1, row2 } };
         var toolbarBox = new Border { Background = Theme.Brush(Theme.Surface), BorderBrush = line, BorderThickness = new Thickness(0, 0, 0, 1), Child = toolbar };
 
+        // ---- crop bar (visible only in crop mode)
+        var apply = new Button { Content = "Применить", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 0), Focusable = false, Background = Theme.Brush(Color.FromRgb(0xF5, 0xD1, 0x42)), Foreground = Brushes.Black };
+        var cancel = new Button { Content = "Отмена", Padding = new Thickness(12, 4, 12, 4), Focusable = false };
+        apply.Click += (_, _) => ApplyCrop(); cancel.Click += (_, _) => CancelCrop();
+        cropBar = new Border
+        {
+            Background = Theme.Brush(Color.FromRgb(0x33, 0x33, 0x33)), BorderBrush = Theme.Brush(Color.FromRgb(0x3A, 0x3A, 0x3A)), BorderThickness = new Thickness(0, 0, 0, 1),
+            Padding = new Thickness(8, 5, 8, 5), Visibility = Visibility.Collapsed,
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { apply, cancel } },
+        };
+
         // ---- bottom bar: status + actions
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
         foreach (var (text, tip, act) in new (string, string, Action)[] {
@@ -259,7 +275,8 @@ sealed class EditorWindow : Window
         };
 
         var root = new DockPanel();
-        DockPanel.SetDock(toolbarBox, Dock.Top); root.Children.Add(toolbarBox);
+        var top = new StackPanel { Children = { toolbarBox, cropBar } };
+        DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
         DockPanel.SetDock(bottomBox, Dock.Bottom); root.Children.Add(bottomBox);
         root.Children.Add(scroll);
         Content = root;
@@ -304,6 +321,8 @@ sealed class EditorWindow : Window
         view.Items.Add(new TextAnn { Color = Colors.LimeGreen, W = 4, A = new Point(240, 40), B = new Point(240, 40), Text = "Привет", Rot = -10, Bg = 1 });
         view.Items.Add(new ArrowAnn { Color = Colors.Red, W = 4, Style = 1, A = new Point(40, 260), B = new Point(260, 200) });
         view.Items.Add(new ArrowAnn { Color = Colors.Red, W = 4, Style = 2, A = new Point(300, 280), B = new Point(470, 240), MidU = 0.5, MidV = -0.3 });
+        view.Items.Add(new MarkerAnn { Color = Colors.Gold, W = 4, A = new Point(20, 80), B = new Point(220, 80) });
+        view.Items.Add(new BlurAnn { W = 4, A = new Point(250, 20), B = new Point(380, 70) });
         view.Select(view.Items[1]);
         SetTool(Tool.Select);
     }
@@ -312,9 +331,28 @@ sealed class EditorWindow : Window
     void SetTool(Tool t)
     {
         CommitText();
+        if (view.CropMode && t != Tool.Crop) view.CancelCrop();
         view.Tool = t;
+        if (t == Tool.Crop) view.BeginCrop();
+        cropBar.Visibility = view.CropMode ? Visibility.Visible : Visibility.Collapsed;
         SetToolButtons(t);
         UpdateContext();
+    }
+
+    void ApplyCrop()
+    {
+        view.ApplyCrop();
+        SetTool(Tool.Select);
+        FitWindow();
+    }
+
+    void CancelCrop() => SetTool(Tool.Select);
+
+    void FitWindow()
+    {
+        // re-run SizeToContent so the window follows the new image size
+        SizeToContent = SizeToContent.Manual;
+        SizeToContent = SizeToContent.WidthAndHeight;
     }
 
     void SetColor(string hex, bool apply = true)
@@ -385,7 +423,8 @@ sealed class EditorWindow : Window
         e.Handled = true;
         switch (e.Key)
         {
-            case Key.Escape: Close(); break;
+            case Key.Escape: if (view.CropMode) CancelCrop(); else Close(); break;
+            case Key.Enter when view.CropMode: ApplyCrop(); break;
             case Key.Z when ctrl && shift: view.Redo(); break;
             case Key.Z when ctrl: view.Undo(); break;
             case Key.Y when ctrl: view.Redo(); break;
@@ -399,6 +438,9 @@ sealed class EditorWindow : Window
             case Key.R when !ctrl: SetTool(Tool.Rect); break;
             case Key.O when !ctrl: SetTool(Tool.Ellipse); break;
             case Key.T when !ctrl: SetTool(Tool.Text); break;
+            case Key.M when !ctrl: SetTool(Tool.Marker); break;
+            case Key.B when !ctrl: SetTool(Tool.Blur); break;
+            case Key.C when !ctrl: SetTool(Tool.Crop); break;
             case Key.Left: view.Nudge(new Vector(-view.S, 0)); break;
             case Key.Right: view.Nudge(new Vector(view.S, 0)); break;
             case Key.Up: view.Nudge(new Vector(0, -view.S)); break;

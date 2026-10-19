@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace ScreenDraw;
 
@@ -29,12 +30,16 @@ abstract class Ann
 
     public Point Center { get { var r = GeomBox(); return new Point(r.X + r.Width / 2, r.Y + r.Height / 2); } }
 
-    public void Draw(DrawingContext dc)
+    public virtual double StrokeHalf => W / 2;
+    public virtual bool CanRotate => true;
+    protected virtual void DrawLocal(DrawingContext dc, BitmapSource src) => DrawLocal(dc);
+
+    public void Draw(DrawingContext dc, BitmapSource src)
     {
-        if (Math.Abs(Rot) < 1e-9) { DrawLocal(dc); return; }
+        if (Math.Abs(Rot) < 1e-9) { DrawLocal(dc, src); return; }
         var c = Center;
         dc.PushTransform(new RotateTransform(Rot, c.X, c.Y));
-        DrawLocal(dc);
+        DrawLocal(dc, src);
         dc.Pop();
     }
 
@@ -250,6 +255,7 @@ sealed class TextAnn : Ann
     public double Scale = 1;
     public int Bg;                      // 0 none, 1 light, 2 dark
     double Pad => Bg == 0 ? 0 : Px * 0.2;
+    public override double StrokeHalf => 0;
     public static double FontPx(double w) => w * 3 + 12;
     public double Px => Math.Max(FontPx(W) * Scale, 4);
 
@@ -286,4 +292,49 @@ sealed class TextAnn : Ann
         Scale *= s;
         B = A;
     }
+}
+
+/// <summary>Semi-transparent highlighter stroke.</summary>
+sealed class MarkerAnn : Ann
+{
+    double Thick => W * 3 + 10;
+    public override double StrokeHalf => Thick / 2;
+    protected override void DrawLocal(DrawingContext dc)
+    {
+        var c = Color;
+        var pen = new Pen(new SolidColorBrush(Color.FromArgb(120, c.R, c.G, c.B)), Thick) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat };
+        dc.DrawLine(pen, A, B);
+    }
+    public override bool HitLocal(Point p, double tol) => DistToSegment(p, A, B) <= Thick / 2 + tol;
+    public override Rect GeomBox() => new(A, B);
+    public override Ann Clone() => CopyTo(new MarkerAnn());
+    public override void ScaleAbout(Point anchor, double sx, double sy) => ScaleAB(anchor, sx, sy);
+    public override Point[] Nodes() => new[] { A, B };
+    public override void SetNode(int i, Point p) { if (i == 0) A = p; else B = p; }
+}
+
+/// <summary>Pixelates the underlying image region (W controls block size).</summary>
+sealed class BlurAnn : Ann
+{
+    public override double StrokeHalf => 0;
+    public override bool CanRotate => false;
+    protected override void DrawLocal(DrawingContext dc) { }
+    protected override void DrawLocal(DrawingContext dc, BitmapSource src)
+    {
+        var r = new Rect(A, B);
+        int x = (int)Math.Max(0, Math.Floor(r.X)), y = (int)Math.Max(0, Math.Floor(r.Y));
+        int w = (int)Math.Min(src.PixelWidth, Math.Ceiling(r.Right)) - x, h = (int)Math.Min(src.PixelHeight, Math.Ceiling(r.Bottom)) - y;
+        if (w < 2 || h < 2) return;
+        double k = Math.Max(3, 4 + W * 2), f = 1.0 / k;
+        var crop = new CroppedBitmap(src, new Int32Rect(x, y, w, h));
+        var small = new TransformedBitmap(crop, new ScaleTransform(f, f));
+        var g = new DrawingGroup();
+        RenderOptions.SetBitmapScalingMode(g, BitmapScalingMode.NearestNeighbor);
+        using (var gc = g.Open()) gc.DrawImage(small, new Rect(x, y, w, h));
+        dc.DrawDrawing(g);
+    }
+    public override bool HitLocal(Point p, double tol) { var r = new Rect(A, B); r.Inflate(tol, tol); return r.Contains(p); }
+    public override Rect GeomBox() => new(A, B);
+    public override Ann Clone() => CopyTo(new BlurAnn());
+    public override void ScaleAbout(Point anchor, double sx, double sy) => ScaleAB(anchor, sx, sy);
 }

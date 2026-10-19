@@ -8,33 +8,38 @@ using System.Windows.Media.Imaging;
 
 namespace ScreenDraw;
 
-enum Tool { Select, Arrow, Line, Rect, Ellipse, Text }
+enum Tool { Select, Arrow, Line, Rect, Ellipse, Text, Marker, Blur, Crop }
+
+sealed record Snap(List<Ann> Items, BitmapSource Image);
 
 /// <summary>
 /// Shows the screenshot plus annotations; drawing, selecting and CorelDRAW-style transforms:
 /// 1st click selects (8 scale handles), clicking the selected object again switches to rotate mode
 /// (corner handles rotate around the pivot marker, which can be dragged anywhere).
+/// Also hosts the crop mode (crop rectangle with 8 handles, applied from the editor toolbar).
 /// </summary>
 sealed class CanvasView : FrameworkElement
 {
-    enum Mode { None, Draw, Move, Scale, Rotate, Pivot, Endpoint }
+    enum Mode { None, Draw, Move, Scale, Rotate, Pivot, Endpoint, Crop }
 
     static readonly Color Accent = Color.FromRgb(0x3A, 0x7B, 0xD5);
     // handle order: TL, T, TR, R, BR, B, BL, L
     static readonly Vector[] Dirs = { new(-1, -1), new(0, -1), new(1, -1), new(1, 0), new(1, 1), new(0, 1), new(-1, 1), new(-1, 0) };
 
-    public BitmapSource Image { get; }
+    public BitmapSource Image { get; private set; }
     public double S { get; }                       // device pixels per DIP
     public List<Ann> Items = new();
     public Ann? Selected { get; private set; }
     public Ann? Hidden;                            // text being edited in a TextBox
     public bool RotateMode { get; private set; }
+    public bool CropMode { get; private set; }
     public Color CurColor = Colors.Red;
     public double CurW = 4;
     public int CurTextBg;
     public int CurArrowStyle;
 
     public event Action? Changed;
+    public event Action? ImageChanged;
     public event Action<Ann?>? SelectionChanged;
     public event Action<TextAnn?, Point>? TextRequested;
     public event Action<Tool>? ToolChanged;
@@ -48,8 +53,10 @@ sealed class CanvasView : FrameworkElement
     Vector grab;
     int handle;
     bool wasSelected, moved;
-    List<Ann>? pending;
-    readonly Stack<List<Ann>> undo = new(), redo = new();
+    Snap? pending;
+    Rect crop, cropOrig;
+    Point cropStart;
+    readonly Stack<Snap> undo = new(), redo = new();
 
     public bool CanUndo => undo.Count > 0;
     public bool CanRedo => redo.Count > 0;
@@ -69,7 +76,7 @@ sealed class CanvasView : FrameworkElement
         set
         {
             _tool = value;
-            Cursor = value == Tool.Select ? Cursors.Arrow : Cursors.Cross;
+            Cursor = value is Tool.Select or Tool.Crop ? Cursors.Arrow : Cursors.Cross;
             if (value != Tool.Select) Select(null);
         }
     }
@@ -77,7 +84,7 @@ sealed class CanvasView : FrameworkElement
     protected override Size MeasureOverride(Size _) => new(Image.PixelWidth / S, Image.PixelHeight / S);
 
     // ---------------------------------------------------------------- handle geometry
-    double Pad(Ann a) => 6 * S + (a is TextAnn ? 0 : a.W / 2);
+    double Pad(Ann a) => 6 * S + a.StrokeHalf;
 
     Rect DispBox(Ann a) { var r = a.GeomBox(); double p = Pad(a); return new Rect(r.X - p, r.Y - p, r.Width + 2 * p, r.Height + 2 * p); }
 
@@ -96,10 +103,32 @@ sealed class CanvasView : FrameworkElement
     {
         dc.PushTransform(new ScaleTransform(1 / S, 1 / S));
         dc.DrawImage(Image, new Rect(0, 0, Image.PixelWidth, Image.PixelHeight));
-        foreach (var a in Items) if (a != Hidden) a.Draw(dc);
-        cur?.Draw(dc);
+        foreach (var a in Items) if (a != Hidden) a.Draw(dc, Image);
+        cur?.Draw(dc, Image);
         if (Selected != null && Selected != Hidden) DrawSelection(dc, Selected);
+        if (CropMode) DrawCrop(dc);
         dc.Pop();
+    }
+
+    void DrawCrop(DrawingContext dc)
+    {
+        var full = new Rect(0, 0, Image.PixelWidth, Image.PixelHeight);
+        dc.DrawGeometry(new SolidColorBrush(Color.FromArgb(150, 0, 0, 0)), null,
+            new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(full), new RectangleGeometry(crop)));
+        var accent = new SolidColorBrush(Accent);
+        dc.DrawRectangle(null, new Pen(Brushes.White, S), crop);
+        var thirds = new Pen(new SolidColorBrush(Color.FromArgb(90, 255, 255, 255)), S);
+        for (int i = 1; i <= 2; i++)
+        {
+            dc.DrawLine(thirds, new Point(crop.X + crop.Width * i / 3, crop.Y), new Point(crop.X + crop.Width * i / 3, crop.Bottom));
+            dc.DrawLine(thirds, new Point(crop.X, crop.Y + crop.Height * i / 3), new Point(crop.Right, crop.Y + crop.Height * i / 3));
+        }
+        double hs = 5 * S;
+        for (int i = 0; i < 8; i++)
+        {
+            var h = BoxPoint(crop, i);
+            dc.DrawEllipse(accent, new Pen(Brushes.White, S), h, hs, hs);
+        }
     }
 
     void DrawSelection(DrawingContext dc, Ann a)
@@ -153,7 +182,7 @@ sealed class CanvasView : FrameworkElement
         using (var dc = dv.RenderOpen())
         {
             dc.DrawImage(Image, new Rect(0, 0, w, h));
-            foreach (var a in Items) a.Draw(dc);
+            foreach (var a in Items) a.Draw(dc, Image);
         }
         var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(dv);
@@ -162,26 +191,35 @@ sealed class CanvasView : FrameworkElement
     }
 
     // ---------------------------------------------------------------- history
-    List<Ann> Snapshot() => Items.Select(a => a.Clone()).ToList();
+    Snap Snapshot() => new(Items.Select(a => a.Clone()).ToList(), Image);
 
-    void PushUndo(List<Ann> snap) { undo.Push(snap); redo.Clear(); Changed?.Invoke(); }
+    void PushUndo(Snap snap) { undo.Push(snap); redo.Clear(); Changed?.Invoke(); }
+
+    void Restore(Snap s)
+    {
+        Items = s.Items;
+        Select(null);
+        if (!ReferenceEquals(Image, s.Image))
+        {
+            Image = s.Image;
+            InvalidateMeasure();
+            ImageChanged?.Invoke();
+        }
+        Changed?.Invoke(); InvalidateVisual();
+    }
 
     public void Undo()
     {
         if (undo.Count == 0) return;
         redo.Push(Snapshot());
-        Items = undo.Pop();
-        Select(null);
-        Changed?.Invoke(); InvalidateVisual();
+        Restore(undo.Pop());
     }
 
     public void Redo()
     {
         if (redo.Count == 0) return;
         undo.Push(Snapshot());
-        Items = redo.Pop();
-        Select(null);
-        Changed?.Invoke(); InvalidateVisual();
+        Restore(redo.Pop());
     }
 
     // ---------------------------------------------------------------- selection / edits
@@ -269,6 +307,62 @@ sealed class CanvasView : FrameworkElement
 
     public void EndTextEdit() { RotateMode = false; }
 
+    // ---------------------------------------------------------------- crop
+    public void BeginCrop()
+    {
+        Select(null);
+        CropMode = true;
+        crop = new Rect(0, 0, Image.PixelWidth, Image.PixelHeight);
+        Cursor = Cursors.Arrow;
+        InvalidateVisual();
+    }
+
+    public void CancelCrop() { CropMode = false; mode = Mode.None; InvalidateVisual(); }
+
+    public void ApplyCrop()
+    {
+        if (!CropMode) return;
+        CropMode = false;
+        int x = (int)Math.Round(crop.X), y = (int)Math.Round(crop.Y);
+        int w = Math.Min((int)Math.Round(crop.Width), Image.PixelWidth - x), h = Math.Min((int)Math.Round(crop.Height), Image.PixelHeight - y);
+        if (w < 2 || h < 2 || (w == Image.PixelWidth && h == Image.PixelHeight)) { InvalidateVisual(); return; }
+        PushUndo(Snapshot());
+        var cb = new CroppedBitmap(Image, new Int32Rect(x, y, w, h));
+        cb.Freeze();
+        Image = cb;
+        var shift = new Vector(-x, -y);
+        foreach (var a in Items) a.Move(shift);
+        Select(null);
+        InvalidateMeasure(); InvalidateVisual();
+        ImageChanged?.Invoke();
+    }
+
+    int HitCropHandle(Point p)
+    {
+        for (int i = 0; i < 8; i++)
+            if ((p - BoxPoint(crop, i)).Length <= 9 * S) return i;
+        return -1;
+    }
+
+    void DragCrop(Point p)
+    {
+        double W = Image.PixelWidth, H = Image.PixelHeight, min = 8;
+        var d = p - cropStart;
+        if (handle == -2)   // move
+        {
+            double nx = Math.Clamp(cropOrig.X + d.X, 0, W - cropOrig.Width), ny = Math.Clamp(cropOrig.Y + d.Y, 0, H - cropOrig.Height);
+            crop = new Rect(nx, ny, cropOrig.Width, cropOrig.Height);
+            return;
+        }
+        var dir = Dirs[handle];
+        double l = cropOrig.Left, t = cropOrig.Top, r = cropOrig.Right, b = cropOrig.Bottom;
+        if (dir.X < 0) l = Math.Clamp(cropOrig.Left + d.X, 0, r - min);
+        if (dir.X > 0) r = Math.Clamp(cropOrig.Right + d.X, l + min, W);
+        if (dir.Y < 0) t = Math.Clamp(cropOrig.Top + d.Y, 0, b - min);
+        if (dir.Y > 0) b = Math.Clamp(cropOrig.Bottom + d.Y, t + min, H);
+        crop = new Rect(l, t, r - l, b - t);
+    }
+
     // ---------------------------------------------------------------- hit testing
     Point Pos(MouseEventArgs e) { var p = e.GetPosition(this); return new Point(p.X * S, p.Y * S); }
 
@@ -314,6 +408,16 @@ sealed class CanvasView : FrameworkElement
     {
         Focus();
         var p = Pos(e);
+
+        if (CropMode)
+        {
+            int ch = HitCropHandle(p);
+            if (ch < 0 && !crop.Contains(p)) return;
+            handle = ch < 0 ? -2 : ch; cropOrig = crop; cropStart = p; mode = Mode.Crop;
+            CaptureMouse();
+            return;
+        }
+
         var tool = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? Tool.Select : _tool;
 
         if (tool == Tool.Select)
@@ -354,6 +458,8 @@ sealed class CanvasView : FrameworkElement
             Tool.Arrow => new ArrowAnn { Style = CurArrowStyle },
             Tool.Line => new LineAnn(),
             Tool.Ellipse => new EllipseAnn(),
+            Tool.Marker => new MarkerAnn(),
+            Tool.Blur => new BlurAnn(),
             _ => new RectAnn(),
         };
         cur.Color = CurColor; cur.W = CurW; cur.A = cur.B = p;
@@ -369,7 +475,7 @@ sealed class CanvasView : FrameworkElement
         switch (mode)
         {
             case Mode.Draw:
-                cur!.B = Constrain(cur.A, p, shift, cur is RectAnn or EllipseAnn);
+                cur!.B = Constrain(cur.A, p, shift, cur is RectAnn or EllipseAnn or BlurAnn);
                 break;
             case Mode.Move:
                 var d = p - last;
@@ -388,6 +494,9 @@ sealed class CanvasView : FrameworkElement
                 break;
             case Mode.Pivot:
                 pivot = p;
+                break;
+            case Mode.Crop:
+                DragCrop(p);
                 break;
         }
         InvalidateVisual();
@@ -410,7 +519,7 @@ sealed class CanvasView : FrameworkElement
             }
             cur = null;
         }
-        else if (mode == Mode.Move && !moved && wasSelected)
+        else if (mode == Mode.Move && !moved && wasSelected && Selected is { CanRotate: true })
         {
             RotateMode = !RotateMode;      // click on the selected object toggles scale <-> rotate
         }
@@ -420,16 +529,24 @@ sealed class CanvasView : FrameworkElement
 
     void UpdateCursor(Point p)
     {
+        if (CropMode)
+        {
+            int ch = HitCropHandle(p);
+            Cursor = ch >= 0 ? HandleCursor(ch) : crop.Contains(p) ? Cursors.SizeAll : Cursors.Arrow;
+            return;
+        }
         if (_tool != Tool.Select && !Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return;
         var (m, i) = HitHandle(p);
         Cursor = m switch
         {
             Mode.Rotate or Mode.Pivot => Cursors.Hand,
             Mode.Endpoint => Cursors.Cross,
-            Mode.Scale => (i % 4) switch { 0 => Cursors.SizeNWSE, 1 => Cursors.SizeNS, 2 => Cursors.SizeNESW, _ => Cursors.SizeWE },
+            Mode.Scale => HandleCursor(i),
             _ => HitItem(p) != null ? Cursors.SizeAll : Cursors.Arrow,
         };
     }
+
+    static Cursor HandleCursor(int i) => (i % 4) switch { 0 => Cursors.SizeNWSE, 1 => Cursors.SizeNS, 2 => Cursors.SizeNESW, _ => Cursors.SizeWE };
 
     // ---------------------------------------------------------------- transforms
     /// <summary>Translate t so that local point <paramref name="anchor"/> lands on world point <paramref name="worldAnchor"/>.</summary>
@@ -450,11 +567,9 @@ sealed class CanvasView : FrameworkElement
         double pad = Pad(o);
         double tx = pl.X - d.X * pad, ty = pl.Y - d.Y * pad;
         double hx = g.X + (d.X + 1) / 2 * g.Width, hy = g.Y + (d.Y + 1) / 2 * g.Height;
-        double sx = double.NaN, sy = double.NaN;
-        if (d.X != 0 && Math.Abs(hx - anchor.X) > 0.5) sx = (tx - anchor.X) / (hx - anchor.X);
-        if (d.Y != 0 && Math.Abs(hy - anchor.Y) > 0.5) sy = (ty - anchor.Y) / (hy - anchor.Y);
-        sx = double.IsNaN(sx) ? 1 : Math.Max(sx, 0.03);
-        sy = double.IsNaN(sy) ? 1 : Math.Max(sy, 0.03);
+        double sx = 1, sy = 1;
+        if (d.X != 0 && Math.Abs(hx - anchor.X) > 0.5) sx = Math.Max((tx - anchor.X) / (hx - anchor.X), 0.03);
+        if (d.Y != 0 && Math.Abs(hy - anchor.Y) > 0.5) sy = Math.Max((ty - anchor.Y) / (hy - anchor.Y), 0.03);
 
         var t = o.Clone();
         t.ScaleAbout(anchor, sx, sy);
