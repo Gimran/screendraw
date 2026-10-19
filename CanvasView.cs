@@ -31,6 +31,7 @@ sealed class CanvasView : FrameworkElement
     public bool RotateMode { get; private set; }
     public Color CurColor = Colors.Red;
     public double CurW = 4;
+    public int CurTextBg;
 
     public event Action? Changed;
     public event Action<Ann?>? SelectionChanged;
@@ -210,6 +211,17 @@ sealed class CanvasView : FrameworkElement
         InvalidateVisual();
     }
 
+    public void SetTextBg(int bg)
+    {
+        CurTextBg = bg;
+        if (Selected is TextAnn t && t.Bg != bg)
+        {
+            PushUndo(Snapshot());
+            t.Bg = bg;
+            InvalidateVisual();
+        }
+    }
+
     public void Nudge(Vector v)
     {
         if (Selected == null) return;
@@ -231,7 +243,7 @@ sealed class CanvasView : FrameworkElement
         else if (text.Length > 0)
         {
             PushUndo(Snapshot());
-            var t = new TextAnn { Color = CurColor, W = CurW, A = pos, B = pos, Text = text };
+            var t = new TextAnn { Color = CurColor, W = CurW, A = pos, B = pos, Text = text, Bg = CurTextBg };
             Items.Add(t);
             Select(t);
         }

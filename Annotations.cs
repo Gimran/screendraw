@@ -145,20 +145,36 @@ sealed class TextAnn : Ann
 {
     public string Text = "";
     public double Scale = 1;
+    public int Bg;                      // 0 none, 1 light, 2 dark
+    double Pad => Bg == 0 ? 0 : Px * 0.2;
     public static double FontPx(double w) => w * 3 + 12;
     public double Px => Math.Max(FontPx(W) * Scale, 4);
 
     FormattedText Format() => new(Text.Length == 0 ? " " : Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
         new Typeface("Segoe UI"), Px, new SolidColorBrush(Color), 1.0);
 
-    protected override void DrawLocal(DrawingContext dc) { if (Text.Length > 0) dc.DrawText(Format(), A); }
-    public override Rect GeomBox() { var f = Format(); return new Rect(A, new Size(Math.Max(f.Width, 8), Math.Max(f.Height, 8))); }
+    protected override void DrawLocal(DrawingContext dc)
+    {
+        if (Text.Length == 0) return;
+        if (Bg != 0)
+        {
+            var fill = Bg == 1 ? Color.FromArgb(235, 250, 250, 250) : Color.FromArgb(215, 24, 24, 24);
+            dc.DrawRoundedRectangle(new SolidColorBrush(fill), null, GeomBox(), Pad * 0.6, Pad * 0.6);
+        }
+        dc.DrawText(Format(), A);
+    }
+    public override Rect GeomBox()
+    {
+        var f = Format();
+        double p = Pad;
+        return new Rect(A.X - p, A.Y - p, Math.Max(f.Width, 8) + 2 * p, Math.Max(f.Height, 8) + 2 * p);
+    }
     public override bool HitLocal(Point p, double tol) { var r = GeomBox(); r.Inflate(tol, tol); return r.Contains(p); }
     public override Ann Clone() => CopyTo(new TextAnn());
     public override void Assign(Ann o)
     {
         base.Assign(o);
-        if (o is TextAnn t) { Text = t.Text; Scale = t.Scale; }
+        if (o is TextAnn t) { Text = t.Text; Scale = t.Scale; Bg = t.Bg; }
     }
     public override void ScaleAbout(Point anchor, double sx, double sy)
     {

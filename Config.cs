@@ -13,6 +13,7 @@ sealed class Config
     public string Hotkey { get; set; } = "Ctrl+Shift+`";
     public string Color { get; set; } = "#E5483B";
     public double Width { get; set; } = 4;
+    public int TextBg { get; set; } = 0;
     public bool CopyOnSave { get; set; } = true;
     public bool CloseAfter { get; set; } = false;
     public bool Autostart { get; set; } = false;

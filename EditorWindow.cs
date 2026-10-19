@@ -61,6 +61,18 @@ static class Theme
         return im;
     }
 
+    public static FrameworkElement BgIcon(int v)
+    {
+        var g = new Grid { Width = 20, Height = 20, IsHitTestVisible = false };
+        var fill = v == 1 ? Color.FromRgb(0xF2, 0xF2, 0xF2) : v == 2 ? Color.FromRgb(0x2A, 0x2A, 0x2A) : Colors.Transparent;
+        g.Children.Add(new Border { Background = new SolidColorBrush(fill), BorderBrush = Brush(Color.FromRgb(0x88, 0x88, 0x88)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(2) });
+        if (v == 0)
+            g.Children.Add(new System.Windows.Shapes.Line { X1 = 3, Y1 = 17, X2 = 17, Y2 = 3, Stroke = Brush(Color.FromRgb(0xE5, 0x48, 0x3B)), StrokeThickness = 2 });
+        else
+            g.Children.Add(new TextBlock { Text = "A", FontWeight = FontWeights.Bold, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = v == 1 ? Brush(Color.FromRgb(0xE5, 0x48, 0x3B)) : Brushes.White });
+        return g;
+    }
+
     public static FrameworkElement CursorIcon() => new System.Windows.Shapes.Path
     {
         Data = Geometry.Parse("M 2,1 L 2,17 L 6.2,13.2 L 9,19.5 L 11.6,18.4 L 8.9,12.2 L 14.5,12 Z"),
@@ -80,6 +92,7 @@ sealed class EditorWindow : Window
     readonly Dictionary<Tool, ToggleButton> toolButtons = new();
     readonly List<(string hex, Border b)> swatches = new();
     readonly List<(double w, ToggleButton b)> presets = new();
+    readonly List<(int v, ToggleButton b)> bgButtons = new();
     readonly Button undoBtn, redoBtn;
     readonly Slider width = new() { Minimum = 1, Maximum = 20, Width = 90, VerticalAlignment = VerticalAlignment.Center, IsSnapToTickEnabled = true, TickFrequency = 1 };
     readonly TextBlock widthLbl = new() { Width = 22, VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Text) };
@@ -134,6 +147,16 @@ sealed class EditorWindow : Window
             b.Click += (_, _) => SetTool(t);
             toolButtons[tool] = b; Add(b, 2);
         }
+        Add(new TextBlock { Text = "Фон текста", Margin = new Thickness(8, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Color.FromRgb(0xAA, 0xAA, 0xAA)) }, 0);
+        foreach (var (v, tip) in new[] { (1, "Светлый фон"), (2, "Тёмный фон"), (0, "Без фона") })
+        {
+            var vv = v;
+            var b = new ToggleButton { Content = Theme.BgIcon(v), ToolTip = tip, Style = iconToggle, Focusable = false, Padding = new Thickness(5) };
+            b.Click += (_, _) => { view.SetTextBg(vv); cfg.TextBg = vv; cfg.Save(); RefreshBg(vv); };
+            bgButtons.Add((v, b)); Add(b, 2);
+        }
+        view.CurTextBg = cfg.TextBg; RefreshBg(cfg.TextBg);
+        view.SelectionChanged += a => { if (a is TextAnn t) { view.CurTextBg = t.Bg; RefreshBg(t.Bg); } };
         Add(new Border { Width = 12 }, 0);
 
         foreach (var hex in Palette)
@@ -215,7 +238,7 @@ sealed class EditorWindow : Window
         view.Items.Add(new ArrowAnn { Color = Colors.Red, W = 4, A = new Point(30, 30), B = new Point(200, 120) });
         view.Items.Add(new RectAnn { Color = Colors.DodgerBlue, W = 3, A = new Point(60, 150), B = new Point(220, 230), Rot = 20 });
         view.Items.Add(new EllipseAnn { Color = Colors.Orange, W = 3, A = new Point(300, 150), B = new Point(420, 230) });
-        view.Items.Add(new TextAnn { Color = Colors.LimeGreen, W = 4, A = new Point(240, 40), B = new Point(240, 40), Text = "Привет", Rot = -10 });
+        view.Items.Add(new TextAnn { Color = Colors.LimeGreen, W = 4, A = new Point(240, 40), B = new Point(240, 40), Text = "Привет", Rot = -10, Bg = 1 });
         view.Select(view.Items[1]);
         SetTool(Tool.Select);
     }
@@ -242,6 +265,8 @@ sealed class EditorWindow : Window
         if (apply) view.StyleSelected(c, null);
     }
 
+    void RefreshBg(int v) { foreach (var (bv, bb) in bgButtons) bb.IsChecked = bv == v; }
+
     void RefreshUndo() { undoBtn.IsEnabled = view.CanUndo; redoBtn.IsEnabled = view.CanRedo; }
 
     // ---------------------------------------------------------------- inline text editing
@@ -256,7 +281,7 @@ sealed class EditorWindow : Window
         tb = new TextBox
         {
             Text = existing?.Text ?? "", AcceptsReturn = true, FontFamily = new FontFamily("Segoe UI"), FontSize = px / s,
-            Foreground = new SolidColorBrush(color), Background = new SolidColorBrush(Color.FromArgb(120, 20, 20, 20)),
+            Foreground = new SolidColorBrush(color), Background = new SolidColorBrush(((existing?.Bg ?? view.CurTextBg) == 1) ? Color.FromArgb(235, 250, 250, 250) : Color.FromArgb(150, 20, 20, 20)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x5B, 0x8D, 0xEF)), BorderThickness = new Thickness(1), Padding = new Thickness(0), MinWidth = 80,
             CaretBrush = Brushes.White,
         };
