@@ -141,6 +141,7 @@ sealed class EditorWindow : Window
         view.Changed += RefreshUndo;
         view.TextRequested += BeginText;
         view.ImageChanged += FitWindow;
+        ContentRendered += OnFirstRender;
         view.ToolChanged += t => { SetToolButtons(t); UpdateContext(); };
         view.SelectionChanged += a =>
         {
@@ -411,9 +412,24 @@ sealed class EditorWindow : Window
 
     void FitWindow()
     {
-        // re-run SizeToContent so the window follows the new image size
+        // re-fit the window to the new image size once, then freeze it again (zoom must not resize the window)
         SizeToContent = SizeToContent.Manual;
+        Width = double.NaN; Height = double.NaN;
         SizeToContent = SizeToContent.WidthAndHeight;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, FreezeSize);
+    }
+
+    void OnFirstRender(object? s, EventArgs e)
+    {
+        ContentRendered -= OnFirstRender;
+        FreezeSize();   // the initial size fits the capture; after that only an explicit re-fit may change it
+    }
+
+    void FreezeSize()
+    {
+        double w = ActualWidth, h = ActualHeight;
+        SizeToContent = SizeToContent.Manual;
+        Width = w; Height = h;
     }
 
     void SetColor(string hex, bool apply = true)
