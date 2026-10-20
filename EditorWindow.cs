@@ -118,7 +118,9 @@ sealed class EditorWindow : Window
     ScrollViewer scroll = null!;
     readonly Slider zoomSlider = new() { Minimum = 10, Maximum = 400, Value = 100, Width = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
     readonly Button zoomLbl = new() { Content = "100%", Width = 52, Focusable = false, ToolTip = "Сбросить масштаб (Ctrl+0)", Margin = new Thickness(8, 4, 2, 4) };
-    bool syncingZoom;
+    bool syncingZoom, panning;
+    Point panStart;
+    double panH, panV;
 
     public EditorWindow(BitmapSource image, double dpiScale, Config cfg)
     {
@@ -315,6 +317,28 @@ sealed class EditorWindow : Window
         {
             Content = stage, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Background = Theme.Brush(Theme.Stage),
+        };
+
+        // middle mouse button: pan
+        scroll.PreviewMouseDown += (_, ev) =>
+        {
+            if (ev.ChangedButton != MouseButton.Middle) return;
+            panning = true; panStart = ev.GetPosition(scroll); panH = scroll.HorizontalOffset; panV = scroll.VerticalOffset;
+            scroll.CaptureMouse(); scroll.Cursor = Cursors.SizeAll;
+            ev.Handled = true;
+        };
+        scroll.PreviewMouseMove += (_, ev) =>
+        {
+            if (!panning) return;
+            var p = ev.GetPosition(scroll);
+            scroll.ScrollToHorizontalOffset(panH - (p.X - panStart.X));
+            scroll.ScrollToVerticalOffset(panV - (p.Y - panStart.Y));
+        };
+        scroll.PreviewMouseUp += (_, ev) =>
+        {
+            if (!panning || ev.ChangedButton != MouseButton.Middle) return;
+            panning = false; scroll.ReleaseMouseCapture(); scroll.ClearValue(CursorProperty);
+            ev.Handled = true;
         };
 
         var root = new DockPanel();
