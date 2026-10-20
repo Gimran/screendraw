@@ -118,6 +118,12 @@ sealed class EditorWindow : Window
     ScrollViewer scroll = null!;
     readonly Slider zoomSlider = new() { Minimum = 10, Maximum = 400, Value = 100, Width = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
     readonly Button zoomLbl = new() { Content = "100%", Width = 52, Focusable = false, ToolTip = "Сбросить масштаб (Ctrl+0)", Margin = new Thickness(8, 4, 2, 4) };
+    ToggleButton bgToggle = null!, pipette = null!;
+    WrapPanel bgRow = null!;
+    Border keySwatch = null!;
+    Slider tolSlider = null!;
+    TextBlock tolLbl = null!;
+    Color KeyColor => (Color)ColorConverter.ConvertFromString(cfg.BgKey);
     bool syncingZoom, panning;
     Point panStart;
     double panH, panV;
@@ -160,6 +166,9 @@ sealed class EditorWindow : Window
         WrapPanel Row() => new() { Margin = new Thickness(8, 3, 8, 3) };
         var row1 = Row();
         var row2 = Row();
+        var row3 = Row();
+        bgRow = row3;
+        row3.Visibility = cfg.BgRemove ? Visibility.Visible : Visibility.Collapsed;
         void Add(Panel row, UIElement el, double right = 4) { if (el is FrameworkElement f) f.Margin = new Thickness(0, 2, right, 2); row.Children.Add(el); }
 
         object Label(UIElement icon, string text) => new StackPanel
@@ -195,6 +204,19 @@ sealed class EditorWindow : Window
         Add(row1, pasteBtn, 2);
         AllowDrop = true;
         Drop += OnDrop;
+        bgToggle = new ToggleButton
+        {
+            Content = new TextBlock { Text = "Убрать фон", Foreground = Theme.Brush(Theme.Text) }, Style = iconToggle, Focusable = false,
+            IsChecked = cfg.BgRemove, ToolTip = "Прозрачный фон: выбранный цвет станет прозрачным при сохранении в PNG и копировании",
+        };
+        bgToggle.Click += (_, _) =>
+        {
+            cfg.BgRemove = bgToggle.IsChecked == true; cfg.Save();
+            row3.Visibility = cfg.BgRemove ? Visibility.Visible : Visibility.Collapsed;
+            if (!cfg.BgRemove) view.PickMode = false;
+            ApplyBg();
+        };
+        Add(row1, bgToggle, 2);
 
         // ---- row 2: options (arrow style / text background, colour, thickness, undo)
         var ag = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
@@ -261,8 +283,39 @@ sealed class EditorWindow : Window
         undoBtn.Click += (_, _) => view.Undo(); redoBtn.Click += (_, _) => view.Redo();
         Add(row2, undoBtn, 2); Add(row2, redoBtn, 0);
 
+        // ---- row 3: background removal options (only while enabled)
+        Add(row3, new TextBlock { Text = "Удалить цвет:", VerticalAlignment = VerticalAlignment.Center, Foreground = dim }, 6);
+        keySwatch = new Border
+        {
+            Width = 26, Height = 22, CornerRadius = new CornerRadius(3), Cursor = Cursors.Hand, BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1),
+            ToolTip = "Цвет фона (клик — выбрать из палитры)",
+        };
+        keySwatch.MouseLeftButtonUp += (_, _) =>
+        {
+            using var d = new System.Windows.Forms.ColorDialog { FullOpen = true, Color = System.Drawing.Color.FromArgb(KeyColor.R, KeyColor.G, KeyColor.B) };
+            if (d.ShowDialog() == System.Windows.Forms.DialogResult.OK) SetKey(Color.FromRgb(d.Color.R, d.Color.G, d.Color.B));
+        };
+        Add(row3, keySwatch, 4);
+        pipette = new ToggleButton
+        {
+            Content = new TextBlock { Text = "\uEF3C", FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 15, Foreground = Theme.Brush(Theme.Text) },
+            Style = iconToggle, Focusable = false, Padding = new Thickness(6), ToolTip = "Пипетка: кликните по цвету фона на картинке",
+        };
+        pipette.Click += (_, _) => view.PickMode = pipette.IsChecked == true;
+        view.ColorPicked += c => { pipette.IsChecked = false; SetKey(c); };
+        Add(row3, pipette, 2);
+        var white = new Button { Content = new TextBlock { Text = "Белый", Foreground = Theme.Brush(Theme.Text) }, Style = iconButton, Focusable = false, ToolTip = "Вернуть белый цвет" };
+        white.Click += (_, _) => SetKey(Colors.White);
+        Add(row3, white, 10);
+        Add(row3, new TextBlock { Text = "Допуск", VerticalAlignment = VerticalAlignment.Center, Foreground = dim }, 6);
+        tolSlider = new Slider { Minimum = 0, Maximum = 50, Width = 140, Value = cfg.BgTol, VerticalAlignment = VerticalAlignment.Center, IsSnapToTickEnabled = true, TickFrequency = 1 };
+        tolLbl = new TextBlock { Width = 36, VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Text), Text = cfg.BgTol + "%" };
+        tolSlider.ValueChanged += (_, ev) => { cfg.BgTol = (int)ev.NewValue; tolLbl.Text = cfg.BgTol + "%"; cfg.Save(); ApplyBg(); };
+        Add(row3, tolSlider, 4); Add(row3, tolLbl, 0);
+        SetKeySwatch();
+
         var line = Theme.Brush(Color.FromRgb(0x3A, 0x3A, 0x3A));
-        var toolbar = new StackPanel { Children = { row1, row2 } };
+        var toolbar = new StackPanel { Children = { row1, row2, row3 } };
         var toolbarBox = new Border { Background = Theme.Brush(Theme.Surface), BorderBrush = line, BorderThickness = new Thickness(0, 0, 0, 1), Child = toolbar };
 
         // ---- crop bar (visible only in crop mode)
@@ -279,7 +332,8 @@ sealed class EditorWindow : Window
         // ---- bottom bar: status + actions
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
         foreach (var (text, tip, act) in new (string, string, Action)[] {
-            ("Копировать", "Ctrl+C", Copy), ("Сохранить", "Ctrl+S", Save), ("Сохранить как…", "Ctrl+Shift+S", SaveAs) })
+            ("Копировать", "Ctrl+C", Copy), ("Копировать путь", "Ctrl+Shift+C — путь к файлу в папке сохранения (файл создаётся, если ещё не сохранён)", CopyPath),
+            ("Сохранить", "Ctrl+S", Save), ("Сохранить как…", "Ctrl+Shift+S", SaveAs) })
         {
             var b = new Button { Content = text, ToolTip = tip, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(6, 6, 0, 6), Focusable = false };
             b.Click += (_, _) => act();
@@ -367,6 +421,7 @@ sealed class EditorWindow : Window
         SetTool(Tool.Arrow);
         SetColor(cfg.Color, apply: false);
         RefreshBg(cfg.TextBg); RefreshArrow(cfg.ArrowStyle);
+        ApplyBg();
         RefreshUndo();
     }
 
@@ -454,6 +509,19 @@ sealed class EditorWindow : Window
         status.Text = "Изображение вставлено — тяните за рамку, Delete — удалить";
     }
 
+    void SetKeySwatch() => keySwatch.Background = new SolidColorBrush(KeyColor);
+
+    void SetKey(Color c)
+    {
+        cfg.BgKey = $"#{c.R:X2}{c.G:X2}{c.B:X2}"; cfg.Save();
+        SetKeySwatch();
+        ApplyBg();
+    }
+
+    void ApplyBg() { dirty = true; view.SetBackgroundRemoval(cfg.BgRemove, KeyColor, cfg.BgTol / 100.0); }
+
+    public void EnableBgForTest() { cfg.BgRemove = true; bgToggle.IsChecked = true; bgRow.Visibility = Visibility.Visible; ApplyBg(); }
+
     void SetToolButtons(Tool t) { foreach (var (k, b) in toolButtons) b.IsChecked = k == t; }
 
     void UpdateContext()
@@ -466,6 +534,7 @@ sealed class EditorWindow : Window
 
     public void SaveTest(string path) => WriteFile(path);
     public void TestZoom(double z) => ApplyZoom(z);
+    public void TestCopyPath() => CopyPath();
 
     public void AddSamples()
     {
@@ -545,7 +614,10 @@ sealed class EditorWindow : Window
 
     void RefreshBg(int v) { foreach (var (bv, bb) in bgButtons) bb.IsChecked = bv == v; }
 
-    void RefreshUndo() { undoBtn.IsEnabled = view.CanUndo; redoBtn.IsEnabled = view.CanRedo; }
+    string? lastPath;
+    bool dirty = true;   // edited since the last file was written
+
+    void RefreshUndo() { dirty = true; undoBtn.IsEnabled = view.CanUndo; redoBtn.IsEnabled = view.CanRedo; }
 
     // ---------------------------------------------------------------- inline text editing
     void BeginText(TextAnn? existing, Point imgPos)
@@ -602,6 +674,7 @@ sealed class EditorWindow : Window
             case Key.Z when ctrl && shift: view.Redo(); break;
             case Key.Z when ctrl: view.Undo(); break;
             case Key.Y when ctrl: view.Redo(); break;
+            case Key.C when ctrl && shift: CopyPath(); break;
             case Key.C when ctrl: Copy(); break;
             case Key.S when ctrl && shift: SaveAs(); break;
             case Key.S when ctrl: Save(); break;
@@ -637,10 +710,15 @@ sealed class EditorWindow : Window
 
     static string NewName() => DateTime.Now.ToString("'screenshot_'yyyy-MM-dd_HH-mm-ss'.png'");
 
-    BitmapSource Result() { CommitText(); return view.Render(); }
+    BitmapSource Result(bool keyed = true) { CommitText(); return view.Render(keyed); }
 
-    static void ToClipboard(BitmapSource bmp)
+    static void ToClipboard(BitmapSource bmp, bool alpha = false)
     {
+        if (alpha)   // transparent result: WPF's SetImage would blacken the transparent area
+        {
+            ClipboardImage.SetWithAlpha(bmp);
+            return;
+        }
         var data = new DataObject();
         data.SetImage(bmp);
         var ms = new MemoryStream();
@@ -683,13 +761,33 @@ sealed class EditorWindow : Window
         }
     }
 
-    void WriteFile(string path, bool forceCopy = false)
+    /// <summary>Saves the result to <paramref name="path"/>. <paramref name="forPath"/>: only the file is wanted (the path goes to the clipboard afterwards).</summary>
+    void WriteFile(string path, bool forceCopy = false, bool forPath = false)
     {
-        var bmp = Result();
-        BitmapEncoder enc = path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ? new JpegBitmapEncoder { QualityLevel = 95 } : new PngBitmapEncoder();
+        bool jpg = path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase);
+        var bmp = Result(keyed: !jpg);
+        BitmapEncoder enc = jpg ? new JpegBitmapEncoder { QualityLevel = 95 } : new PngBitmapEncoder();
         enc.Frames.Add(BitmapFrame.Create(bmp));
         using (var fs = File.Create(path)) enc.Save(fs);
-        if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp); } catch { } }
+        lastPath = path; dirty = false;
+        if (forPath) return;
+        if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp, alpha: !jpg && view.KeyedImage != null); } catch (Exception ex) { status.Text = "Буфер обмена: " + ex.Message; } }
         Finish((forceCopy ? "Скопировано и сохранено: " : "Сохранено: ") + path);
+    }
+
+    /// <summary>Copies the file path as text; the image is saved first if it has not been saved yet or was edited since.</summary>
+    void CopyPath()
+    {
+        try
+        {
+            if (lastPath == null || dirty || !File.Exists(lastPath))
+            {
+                Directory.CreateDirectory(cfg.SaveDir);
+                WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()), forPath: true);
+            }
+            Clipboard.SetText(lastPath!);
+            Finish("Путь скопирован: " + lastPath);
+        }
+        catch (Exception ex) { status.Text = "Не удалось скопировать путь: " + ex.Message; }
     }
 }

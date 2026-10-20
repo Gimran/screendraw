@@ -60,6 +60,40 @@ sealed class CanvasView : FrameworkElement
     public Ann? Hidden;                            // text being edited in a TextBox
     public bool RotateMode { get; private set; }
     public bool CropMode { get; private set; }
+    public BitmapSource? KeyedImage { get; private set; }   // base image with the background made transparent (preview / PNG export)
+    bool keyOn; Color keyColor = Colors.White; double keyTol = 0.10;
+    BitmapSource Src => KeyedImage ?? Image;
+
+    public void SetBackgroundRemoval(bool on, Color key, double tol)
+    {
+        keyOn = on; keyColor = key; keyTol = tol;
+        RefreshKeyed();
+        InvalidateVisual();
+    }
+
+    void RefreshKeyed() => KeyedImage = keyOn ? BackgroundRemover.Apply(Image, keyColor, keyTol) : null;
+
+    void SetImage(BitmapSource img) { Image = img; RefreshKeyed(); }
+
+    // eyedropper
+    bool _pick;
+    public bool PickMode
+    {
+        get => _pick;
+        set { _pick = value; Cursor = value ? Cursors.Pen : (_tool is Tool.Select or Tool.Crop ? Cursors.Arrow : Cursors.Cross); }
+    }
+    public event Action<Color>? ColorPicked;
+
+    void PickAt(Point p)
+    {
+        int x = (int)Math.Floor(p.X), y = (int)Math.Floor(p.Y);
+        if (x < 0 || y < 0 || x >= Image.PixelWidth || y >= Image.PixelHeight) return;
+        var px = new byte[4];
+        new FormatConvertedBitmap(new CroppedBitmap(Image, new Int32Rect(x, y, 1, 1)), PixelFormats.Bgra32, null, 0).CopyPixels(px, 4, 0);
+        PickMode = false;
+        ColorPicked?.Invoke(Color.FromRgb(px[2], px[1], px[0]));
+    }
+
     public Color CurColor = Colors.Red;
     public double CurW = 4;
     public int CurTextBg;
@@ -133,14 +167,31 @@ sealed class CanvasView : FrameworkElement
         var org = Origin;
         dc.PushTransform(new TranslateTransform(org.X, org.Y));
         dc.PushTransform(new ScaleTransform(Zoom, Zoom));
-        dc.DrawImage(Image, new Rect(0, 0, Image.PixelWidth, Image.PixelHeight));
-        foreach (var a in Items) if (a != Hidden) a.Draw(dc, Image);
-        cur?.Draw(dc, Image);
+        var src = Src;
+        if (KeyedImage != null) DrawChecker(dc);
+        dc.DrawImage(src, new Rect(0, 0, Image.PixelWidth, Image.PixelHeight));
+        foreach (var a in Items) if (a != Hidden) a.Draw(dc, src);
+        cur?.Draw(dc, src);
         if (Selected != null && Selected != Hidden) DrawSelection(dc, Selected);
         if (CropMode) DrawCrop(dc);
         dc.Pop();
         dc.Pop();
         dc.Pop();
+    }
+
+    void DrawChecker(DrawingContext dc)
+    {
+        double t = 8 * U;   // 8 DIP squares
+        var tile = new DrawingGroup();
+        using (var g = tile.Open())
+        {
+            g.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3A)), null, new Rect(0, 0, 2 * t, 2 * t));
+            var light = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55));
+            g.DrawRectangle(light, null, new Rect(0, 0, t, t));
+            g.DrawRectangle(light, null, new Rect(t, t, t, t));
+        }
+        var brush = new DrawingBrush(tile) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, 2 * t, 2 * t), ViewportUnits = BrushMappingMode.Absolute };
+        dc.DrawRectangle(brush, null, new Rect(0, 0, Image.PixelWidth, Image.PixelHeight));
     }
 
     void DrawCrop(DrawingContext dc)
@@ -214,14 +265,15 @@ sealed class CanvasView : FrameworkElement
     }
 
     /// <summary>Final image at native resolution, without selection UI.</summary>
-    public BitmapSource Render()
+    public BitmapSource Render(bool keyed = true)
     {
         int w = Image.PixelWidth, h = Image.PixelHeight;
+        var src = keyed ? Src : Image;
         var dv = new DrawingVisual();
         using (var dc = dv.RenderOpen())
         {
-            dc.DrawImage(Image, new Rect(0, 0, w, h));
-            foreach (var a in Items) a.Draw(dc, Image);
+            dc.DrawImage(src, new Rect(0, 0, w, h));
+            foreach (var a in Items) a.Draw(dc, src);
         }
         var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(dv);
@@ -240,7 +292,7 @@ sealed class CanvasView : FrameworkElement
         Select(null);
         if (!ReferenceEquals(Image, s.Image))
         {
-            Image = s.Image;
+            SetImage(s.Image);
             InvalidateMeasure();
             ImageChanged?.Invoke();
         }
@@ -388,7 +440,7 @@ sealed class CanvasView : FrameworkElement
         var rtb = new RenderTargetBitmap(nw, nh, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(dv);
         rtb.Freeze();
-        Image = rtb;
+        SetImage(rtb);
         var shift = new Vector(-il, -it);
         foreach (var a in Items) a.Move(shift);
         if (pivot is { } pv) pivot = pv + shift;
@@ -418,7 +470,7 @@ sealed class CanvasView : FrameworkElement
         PushUndo(Snapshot());
         var cb = new CroppedBitmap(Image, new Int32Rect(x, y, w, h));
         cb.Freeze();
-        Image = cb;
+        SetImage(cb);
         var shift = new Vector(-x, -y);
         foreach (var a in Items) a.Move(shift);
         Select(null);
@@ -504,6 +556,8 @@ sealed class CanvasView : FrameworkElement
     {
         Focus();
         var p = Pos(e);
+
+        if (PickMode) { PickAt(p); return; }
 
         if (CropMode)
         {
@@ -635,6 +689,7 @@ sealed class CanvasView : FrameworkElement
 
     void UpdateCursor(Point p)
     {
+        if (PickMode) { Cursor = Cursors.Pen; return; }
         if (CropMode)
         {
             int ch = HitCropHandle(p);

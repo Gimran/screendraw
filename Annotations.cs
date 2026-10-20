@@ -328,6 +328,8 @@ sealed class MarkerAnn : Ann
 {
     double Thick => W * 3 + 10;
     public override double StrokeHalf => Thick / 2;
+    public override bool ShowBox => false;
+    public override bool CanRotate => false;
     protected override void DrawLocal(DrawingContext dc)
     {
         var c = Color;

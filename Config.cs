@@ -15,6 +15,9 @@ sealed class Config
     public double Width { get; set; } = 4;
     public int TextBg { get; set; } = 0;
     public int ArrowStyle { get; set; } = 0;
+    public bool BgRemove { get; set; } = false;
+    public string BgKey { get; set; } = "#FFFFFF";
+    public int BgTol { get; set; } = 5;
     public bool CopyOnSave { get; set; } = true;
     public bool CloseAfter { get; set; } = true;
     public int Version { get; set; } = 2;
@@ -35,8 +38,11 @@ sealed class Config
         catch { return new Config(); }
     }
 
+    public static bool NoSave;   // set by the debug test hooks so they never touch the user's config
+
     public void Save()
     {
+        if (NoSave) return;
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(PathFile)!);

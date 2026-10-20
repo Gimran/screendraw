@@ -24,6 +24,8 @@ static class Program
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, ThemeMode = ThemeMode.Dark };
         var ctl = new Controller(app);
         if (args.Contains("--now")) app.Dispatcher.BeginInvoke(ctl.Capture);
+        int ii = Array.IndexOf(args, "--test-image");   // debug: open an image file, enable background removal, optionally save to SCREENDRAW_TEST_OUT
+        if (ii >= 0) app.Dispatcher.BeginInvoke(() => ctl.TestImage(args[ii + 1]));
         int ti = Array.IndexOf(args, "--test-rect");   // debug: skip selection, grab x,y,w,h and add sample marks
         if (ti >= 0) { var n = args[ti + 1].Split(',').Select(int.Parse).ToArray(); app.Dispatcher.BeginInvoke(() => ctl.TestRect(n[0], n[1], n[2], n[3])); }
         app.Run();
@@ -148,11 +150,27 @@ sealed class Controller : IDisposable
         (active ?? overlays[0]).Activate();
     }
 
+    public void TestImage(string path)
+    {
+        Config.NoSave = true;
+        var b = new BitmapImage();
+        b.BeginInit(); b.CacheOption = BitmapCacheOption.OnLoad; b.UriSource = new Uri(path); b.EndInit(); b.Freeze();
+        if (int.TryParse(Environment.GetEnvironmentVariable("SCREENDRAW_TEST_TOL"), out var tt)) cfg.BgTol = tt;
+        var ed = new EditorWindow(b, 1, cfg);
+        ed.Show();
+        ed.EnableBgForTest();
+        var outPath = Environment.GetEnvironmentVariable("SCREENDRAW_TEST_OUT");
+        if (!string.IsNullOrEmpty(outPath)) ed.SaveTest(outPath);
+    }
+
     public void TestRect(int x, int y, int w, int h)
     {
+        Config.NoSave = true;
         var ed = new EditorWindow(Grab(new Drawing.Rectangle(x, y, w, h)), 1, cfg);
         ed.Show();
         ed.AddSamples();
+        if (Environment.GetEnvironmentVariable("SCREENDRAW_TEST_DIR") is { Length: > 0 } td) cfg.SaveDir = td;
+        if (Environment.GetEnvironmentVariable("SCREENDRAW_TEST_COPYPATH") == "1") ed.TestCopyPath();
         if (double.TryParse(Environment.GetEnvironmentVariable("SCREENDRAW_TEST_ZOOM"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tz)) ed.TestZoom(tz);
         var outPath = Environment.GetEnvironmentVariable("SCREENDRAW_TEST_OUT");
         if (!string.IsNullOrEmpty(outPath)) ed.SaveTest(outPath);
