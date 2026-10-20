@@ -34,6 +34,10 @@ abstract class Ann
     public virtual bool CanRotate => true;
     /// <summary>Show the 8-handle bounding box when selected (arrows only use their end nodes).</summary>
     public virtual bool ShowBox => true;
+    /// <summary>Nodes with index below this are line-like end points (the opposite end stays pinned while dragging).</summary>
+    public virtual int EndpointCount => 2;
+    /// <summary>Box used to decide whether the canvas must grow (may be larger than the geometry box).</summary>
+    protected virtual Rect ReachBox() => GeomBox();
     /// <summary>Whether this object may grow the canvas when it sticks out of the image.</summary>
     public virtual bool ExtendsCanvas => true;
     protected virtual double ExtraReach => 2;
@@ -41,7 +45,7 @@ abstract class Ann
     /// <summary>Bounds of the drawn object in image coordinates (after rotation, including stroke).</summary>
     public Rect WorldBounds()
     {
-        var r = GeomBox();
+        var r = ReachBox();
         var pts = new[] { r.TopLeft, r.TopRight, r.BottomRight, r.BottomLeft };
         double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
         foreach (var p in pts)
@@ -66,7 +70,7 @@ abstract class Ann
     public Point ToWorld(Point local) => RotatePoint(local, Center, Rot);
     public Point ToLocal(Point world) => RotatePoint(world, Center, -Rot);
     public bool Hit(Point world, double tol) => HitLocal(ToLocal(world), tol);
-    public void Move(Vector v) { A += v; B += v; }
+    public virtual void Move(Vector v) { A += v; B += v; }
 
     public static Point RotatePoint(Point p, Point c, double deg)
     {
@@ -361,4 +365,111 @@ sealed class BlurAnn : Ann
     public override Rect GeomBox() => new(A, B);
     public override Ann Clone() => CopyTo(new BlurAnn());
     public override void ScaleAbout(Point anchor, double sx, double sy) => ScaleAB(anchor, sx, sy);
+}
+
+/// <summary>Speech balloon: rounded frame (A..B) with a tail pointing at a draggable tip node.</summary>
+sealed class BalloonAnn : Ann
+{
+    public Point Tip;
+    public bool AutoTip = true;
+    public override int EndpointCount => 0;
+
+    Rect Body() => new(A, B);
+
+    Point TipPt()
+    {
+        if (!AutoTip) return Tip;
+        var r = Body();
+        return new Point(r.X + r.Width * 0.3, r.Bottom + Math.Max(18, r.Height * 0.35));
+    }
+
+    /// <summary>Which side the tail leaves from (0 top, 1 right, 2 bottom, 3 left) and the base span; false if no tail.</summary>
+    bool Tail(out int side, out double c, out double half, out Point tip, out double r)
+    {
+        var b = Body(); tip = TipPt();
+        side = 0; c = 0; half = 0; r = Math.Min(Math.Min(b.Width, b.Height) * 0.22, 22);
+        if (b.Width < 4 || b.Height < 4 || b.Contains(tip)) return false;
+        double dx = (tip.X - (b.X + b.Width / 2)) / (b.Width / 2), dy = (tip.Y - (b.Y + b.Height / 2)) / (b.Height / 2);
+        bool horiz = Math.Abs(dx) > Math.Abs(dy);
+        side = horiz ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0);
+        double len = horiz ? b.Height : b.Width;
+        half = Math.Max(Math.Min(len * 0.17, 18), 3);
+        double lo = (horiz ? b.Y : b.X) + r + half, hi = (horiz ? b.Bottom : b.Right) - r - half;
+        double want = horiz ? tip.Y : tip.X;
+        c = hi < lo ? (lo + hi) / 2 : Math.Clamp(want, lo, hi);
+        return true;
+    }
+
+    Geometry Build()
+    {
+        var b = Body();
+        bool hasTail = Tail(out int side, out double c, out double hw, out var tip, out double r);
+        double L = b.Left, T = b.Top, R = b.Right, B = b.Bottom;
+        var g = new StreamGeometry();
+        using (var ctx = g.Open())
+        {
+            void Arc(Point p) => ctx.ArcTo(p, new Size(r, r), 0, false, SweepDirection.Clockwise, true, true);
+            ctx.BeginFigure(new Point(L + r, T), false, true);
+            if (hasTail && side == 0) { ctx.LineTo(new Point(c - hw, T), true, true); ctx.LineTo(tip, true, true); ctx.LineTo(new Point(c + hw, T), true, true); }
+            ctx.LineTo(new Point(R - r, T), true, true); Arc(new Point(R, T + r));
+            if (hasTail && side == 1) { ctx.LineTo(new Point(R, c - hw), true, true); ctx.LineTo(tip, true, true); ctx.LineTo(new Point(R, c + hw), true, true); }
+            ctx.LineTo(new Point(R, B - r), true, true); Arc(new Point(R - r, B));
+            if (hasTail && side == 2) { ctx.LineTo(new Point(c + hw, B), true, true); ctx.LineTo(tip, true, true); ctx.LineTo(new Point(c - hw, B), true, true); }
+            ctx.LineTo(new Point(L + r, B), true, true); Arc(new Point(L, B - r));
+            if (hasTail && side == 3) { ctx.LineTo(new Point(L, c + hw), true, true); ctx.LineTo(tip, true, true); ctx.LineTo(new Point(L, c - hw), true, true); }
+            ctx.LineTo(new Point(L, T + r), true, true); Arc(new Point(L + r, T));
+        }
+        g.Freeze();
+        return g;
+    }
+
+    protected override void DrawLocal(DrawingContext dc)
+    {
+        if (Body().Width < 2 || Body().Height < 2) return;
+        dc.DrawGeometry(null, MakePen(), Build());
+    }
+
+    public override bool HitLocal(Point p, double tol)
+    {
+        var rect = Body();
+        var outer = rect; outer.Inflate(W / 2 + tol, W / 2 + tol);
+        double m = W / 2 + tol;
+        if (outer.Contains(p))
+        {
+            if (rect.Width <= 2 * m || rect.Height <= 2 * m) return true;
+            var inner = rect; inner.Inflate(-m, -m);
+            if (!inner.Contains(p)) return true;
+        }
+        if (Tail(out int side, out double c, out double hw, out var tip, out _))
+        {
+            Point b1, b2;
+            switch (side)
+            {
+                case 0: b1 = new Point(c - hw, rect.Top); b2 = new Point(c + hw, rect.Top); break;
+                case 1: b1 = new Point(rect.Right, c - hw); b2 = new Point(rect.Right, c + hw); break;
+                case 2: b1 = new Point(c - hw, rect.Bottom); b2 = new Point(c + hw, rect.Bottom); break;
+                default: b1 = new Point(rect.Left, c - hw); b2 = new Point(rect.Left, c + hw); break;
+            }
+            if (DistToSegment(p, tip, b1) <= W / 2 + tol || DistToSegment(p, tip, b2) <= W / 2 + tol) return true;
+        }
+        return false;
+    }
+
+    public override Rect GeomBox() => Body();
+    protected override Rect ReachBox() { var r = Body(); r.Union(TipPt()); return r; }
+    public override Ann Clone() => CopyTo(new BalloonAnn());
+    public override void Assign(Ann o)
+    {
+        base.Assign(o);
+        if (o is BalloonAnn t) { Tip = t.Tip; AutoTip = t.AutoTip; }
+    }
+    public override void ScaleAbout(Point anchor, double sx, double sy)
+    {
+        var tip = TipPt();
+        ScaleAB(anchor, sx, sy);
+        if (!AutoTip) Tip = ScalePt(tip, anchor, sx, sy);
+    }
+    public override Point[] Nodes() => new[] { TipPt() };
+    public override void SetNode(int i, Point p) { Tip = p; AutoTip = false; }
+    public override void Move(Vector v) { A += v; B += v; Tip += v; }
 }

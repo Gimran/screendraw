@@ -153,6 +153,8 @@ sealed class Controller : IDisposable
         var ed = new EditorWindow(Grab(new Drawing.Rectangle(x, y, w, h)), 1, cfg);
         ed.Show();
         ed.AddSamples();
+        var outPath = Environment.GetEnvironmentVariable("SCREENDRAW_TEST_OUT");
+        if (!string.IsNullOrEmpty(outPath)) ed.SaveTest(outPath);
     }
 
     void CloseOverlays()

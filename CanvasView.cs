@@ -8,7 +8,7 @@ using System.Windows.Media.Imaging;
 
 namespace ScreenDraw;
 
-enum Tool { Select, Arrow, Line, Rect, Ellipse, Text, Marker, Blur, Crop }
+enum Tool { Select, Arrow, Line, Rect, Ellipse, Text, Marker, Blur, Crop, Balloon }
 
 sealed record Snap(List<Ann> Items, BitmapSource Image);
 
@@ -29,6 +29,10 @@ sealed class CanvasView : FrameworkElement
     /// <summary>Empty margin (DIP) around the image where drawing can start / shapes can stick out.</summary>
     public const double PadDip = 28;
     double M => PadDip * S;                         // margin in device pixels
+
+    /// <summary>Top-left of the image in view device pixels: centred, never closer than the margin to the edge.</summary>
+    Point Origin => new(Math.Floor(Math.Max(M, (ActualWidth * S - Image.PixelWidth) / 2)), Math.Floor(Math.Max(M, (ActualHeight * S - Image.PixelHeight) / 2)));
+    public Vector OriginDip { get { var o = Origin; return new Vector(o.X / S, o.Y / S); } }
 
     public BitmapSource Image { get; private set; }
     public double S { get; }                       // device pixels per DIP
@@ -107,7 +111,8 @@ sealed class CanvasView : FrameworkElement
     {
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ActualWidth, ActualHeight));   // hit-testable margin
         dc.PushTransform(new ScaleTransform(1 / S, 1 / S));
-        dc.PushTransform(new TranslateTransform(M, M));
+        var org = Origin;
+        dc.PushTransform(new TranslateTransform(org.X, org.Y));
         dc.DrawImage(Image, new Rect(0, 0, Image.PixelWidth, Image.PixelHeight));
         foreach (var a in Items) if (a != Hidden) a.Draw(dc, Image);
         cur?.Draw(dc, Image);
@@ -413,7 +418,7 @@ sealed class CanvasView : FrameworkElement
     }
 
     // ---------------------------------------------------------------- hit testing
-    Point Pos(MouseEventArgs e) { var p = e.GetPosition(this); return new Point(p.X * S - M, p.Y * S - M); }
+    Point Pos(MouseEventArgs e) { var p = e.GetPosition(this); var o = Origin; return new Point(p.X * S - o.X, p.Y * S - o.Y); }
 
     Ann? HitItem(Point p)
     {
@@ -526,6 +531,7 @@ sealed class CanvasView : FrameworkElement
             Tool.Ellipse => new EllipseAnn(),
             Tool.Marker => new MarkerAnn(),
             Tool.Blur => new BlurAnn(),
+            Tool.Balloon => new BalloonAnn(),
             _ => new RectAnn(),
         };
         cur.Color = CurColor; cur.W = CurW; cur.A = cur.B = p;
@@ -649,7 +655,7 @@ sealed class CanvasView : FrameworkElement
         var o = orig!;
         var t = o.Clone();
         var pl = o.ToLocal(p);
-        if (handle < 2)
+        if (handle < o.EndpointCount)
         {
             var other = handle == 0 ? o.B : o.A;
             t.SetNode(handle, Constrain(other, pl, shift, false));

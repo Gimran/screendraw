@@ -76,6 +76,13 @@ static class Theme
         return g;
     }
 
+    public static FrameworkElement BalloonIcon() => new System.Windows.Shapes.Path
+    {
+        Data = Geometry.Parse("M 4,3 L 17,3 Q 19,3 19,5 L 19,12 Q 19,14 17,14 L 11,14 L 6,19 L 7,14 L 4,14 Q 2,14 2,12 L 2,5 Q 2,3 4,3 Z"),
+        Stroke = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDD)), StrokeThickness = 1.8, StrokeLineJoin = PenLineJoin.Round,
+        Width = 18, Height = 18, Stretch = Stretch.Uniform, IsHitTestVisible = false,
+    };
+
     public static FrameworkElement CursorIcon() => new System.Windows.Shapes.Path
     {
         Data = Geometry.Parse("M 2,1 L 2,17 L 6.2,13.2 L 9,19.5 L 11.6,18.4 L 8.9,12.2 L 14.5,12 Z"),
@@ -160,6 +167,7 @@ sealed class EditorWindow : Window
             (Tool.Line, Theme.Icon("line"), "Линия", "L"),
             (Tool.Rect, Theme.Icon("rect"), "Рамка", "R"),
             (Tool.Ellipse, Theme.Icon("ellipse"), "Овал", "O"),
+            (Tool.Balloon, Theme.BalloonIcon(), "Выноска", "Выноска с указателем (K). Узел — куда указывает"),
             (Tool.Text, Theme.Icon("text"), "Текст", "T"),
             (Tool.Marker, Theme.Icon("marker"), "Маркер", "Выделитель (M)"),
             (Tool.Blur, Theme.Icon("blur"), "Размыть", "Пикселизация области (B)"),
@@ -268,7 +276,7 @@ sealed class EditorWindow : Window
         bottom.Children.Add(status); bottom.Children.Add(actions);
         var bottomBox = new Border { BorderBrush = line, BorderThickness = new Thickness(0, 1, 0, 0), Child = bottom };
 
-        var stage = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var stage = new Grid();
         stage.Children.Add(view);
         stage.Children.Add(overlay);
         var scroll = new ScrollViewer
@@ -316,6 +324,8 @@ sealed class EditorWindow : Window
 
     void RefreshArrow(int v) { foreach (var (av, ab) in arrowButtons) ab.IsChecked = av == v; }
 
+    public void SaveTest(string path) => WriteFile(path);
+
     public void AddSamples()
     {
         view.Items.Add(new ArrowAnn { Color = Colors.Red, W = 4, A = new Point(30, 30), B = new Point(200, 120) });
@@ -326,7 +336,8 @@ sealed class EditorWindow : Window
         view.Items.Add(new ArrowAnn { Color = Colors.Red, W = 4, Style = 2, A = new Point(300, 280), B = new Point(470, 240), MidU = 0.5, MidV = -0.3 });
         view.Items.Add(new MarkerAnn { Color = Colors.Gold, W = 4, A = new Point(20, 80), B = new Point(220, 80) });
         view.Items.Add(new BlurAnn { W = 4, A = new Point(250, 20), B = new Point(380, 70) });
-        view.Select(view.Items[1]);
+        view.Items.Add(new BalloonAnn { Color = Colors.Orange, W = 3, A = new Point(40, 100), B = new Point(200, 160) });
+        view.Select(view.Items[^1]);
         SetTool(Tool.Select);
     }
 
@@ -392,7 +403,7 @@ sealed class EditorWindow : Window
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x5B, 0x8D, 0xEF)), BorderThickness = new Thickness(1), Padding = new Thickness(0), MinWidth = 80,
             CaretBrush = Brushes.White,
         };
-        Canvas.SetLeft(tb, imgPos.X / s + CanvasView.PadDip - 1); Canvas.SetTop(tb, imgPos.Y / s + CanvasView.PadDip - 1);
+        var od = view.OriginDip; Canvas.SetLeft(tb, imgPos.X / s + od.X - 1); Canvas.SetTop(tb, imgPos.Y / s + od.Y - 1);
         view.Hidden = existing;
         overlay.Children.Add(tb);
         view.InvalidateVisual();
@@ -440,6 +451,7 @@ sealed class EditorWindow : Window
             case Key.L when !ctrl: SetTool(Tool.Line); break;
             case Key.R when !ctrl: SetTool(Tool.Rect); break;
             case Key.O when !ctrl: SetTool(Tool.Ellipse); break;
+            case Key.K when !ctrl: SetTool(Tool.Balloon); break;
             case Key.T when !ctrl: SetTool(Tool.Text); break;
             case Key.M when !ctrl: SetTool(Tool.Marker); break;
             case Key.B when !ctrl: SetTool(Tool.Blur); break;
