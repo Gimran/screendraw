@@ -668,6 +668,8 @@ sealed class CanvasView : FrameworkElement
         var t = o.Clone();
         t.ScaleAbout(anchor, sx, sy);
         Pin(t, anchor, o.ToWorld(anchor));
+        if (t is BalloonAnn bt)   // resizing the frame must not drag the pointer tip along
+            bt.SetNode(0, bt.ToLocal(o.ToWorld(o.Nodes()[0])));
         Selected!.Assign(t);
     }
 
