@@ -20,6 +20,10 @@ static class Program
     static void Main(string[] args)
     {
         using var mutex = new Mutex(true, "ScreenDraw.SingleInstance", out bool first);
+        if (!first && args.Contains("--restarted"))
+        {
+            try { first = mutex.WaitOne(8000); } catch (AbandonedMutexException) { first = true; }
+        }
         if (!first) return;
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, ThemeMode = ThemeMode.Dark };
         var ctl = new Controller(app);
@@ -50,14 +54,15 @@ sealed class Controller : IDisposable
     public Controller(Application app)
     {
         this.app = app;
+        Loc.Init(Environment.GetEnvironmentVariable("SCREENDRAW_TEST_LANG") ?? cfg.Language);
         msgWindow = new HwndSource(new HwndSourceParameters("ScreenDrawHotkey") { ParentWindow = new IntPtr(-3), Width = 0, Height = 0 });
         msgWindow.AddHook(WndProc);
 
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Сделать скриншот", null, (_, _) => Capture());
-        menu.Items.Add("Настройки…", null, (_, _) => ShowSettings());
+        menu.Items.Add(Loc.T("Сделать скриншот"), null, (_, _) => Capture());
+        menu.Items.Add(Loc.T("Настройки…"), null, (_, _) => ShowSettings());
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Выход", null, (_, _) => app.Shutdown());
+        menu.Items.Add(Loc.T("Выход"), null, (_, _) => app.Shutdown());
         tray = new Forms.NotifyIcon { Icon = MakeIcon(), ContextMenuStrip = menu, Visible = true };
         tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) Capture(); };
 
@@ -88,9 +93,9 @@ sealed class Controller : IDisposable
         int err = hotkeyOk ? 0 : Marshal.GetLastWin32Error();
         tray.Text = $"ScreenDraw ({cfg.Hotkey})";
         if (!hotkeyOk)
-            tray.ShowBalloonTip(5000, "ScreenDraw", $"Не удалось занять {cfg.Hotkey} — сочетание занято другой программой (код {err}). Выберите другое в настройках.", Forms.ToolTipIcon.Warning);
+            tray.ShowBalloonTip(5000, "ScreenDraw", Loc.F("Не удалось занять {0} — сочетание занято другой программой (код {1}). Выберите другое в настройках.", cfg.Hotkey, err), Forms.ToolTipIcon.Warning);
         else if (announce)
-            tray.ShowBalloonTip(2000, "ScreenDraw", $"Запущено. Скриншот: {cfg.Hotkey}", Forms.ToolTipIcon.Info);
+            tray.ShowBalloonTip(2000, "ScreenDraw", Loc.F("Запущено. Скриншот: {0}", cfg.Hotkey), Forms.ToolTipIcon.Info);
     }
 
     void ShowSettings()
@@ -98,10 +103,16 @@ sealed class Controller : IDisposable
         var w = new SettingsWindow(cfg);
         if (w.ShowDialog() == true)
         {
+            var oldLang = cfg.Language;
             w.ApplyTo(cfg);
             cfg.Save();
             cfg.ApplyAutostart();
             ApplyHotkey();
+            if (cfg.Language != oldLang)   // texts are built once at startup: restart to apply the language
+            {
+                System.Diagnostics.Process.Start(Environment.ProcessPath!, "--restarted");
+                app.Shutdown();
+            }
         }
     }
 
@@ -127,7 +138,7 @@ sealed class Controller : IDisposable
         catch (Exception ex)
         {
             CloseOverlays();
-            tray.ShowBalloonTip(5000, "ScreenDraw", "Ошибка: " + ex.Message, Forms.ToolTipIcon.Error);
+            tray.ShowBalloonTip(5000, "ScreenDraw", Loc.T("Ошибка: ") + ex.Message, Forms.ToolTipIcon.Error);
         }
     }
 
@@ -158,7 +169,9 @@ sealed class Controller : IDisposable
         if (int.TryParse(Environment.GetEnvironmentVariable("SCREENDRAW_TEST_TOL"), out var tt)) cfg.BgTol = tt;
         var ed = new EditorWindow(b, 1, cfg);
         ed.Show();
-        ed.EnableBgForTest();
+        if (Environment.GetEnvironmentVariable("SCREENDRAW_TEST_NOBG") != "1") ed.EnableBgForTest();
+        var smp = Environment.GetEnvironmentVariable("SCREENDRAW_TEST_SAMPLES");
+        if (smp == "1") ed.AddSamples(); else if (smp == "demo") ed.AddDemo();
         var outPath = Environment.GetEnvironmentVariable("SCREENDRAW_TEST_OUT");
         if (!string.IsNullOrEmpty(outPath)) ed.SaveTest(outPath);
     }

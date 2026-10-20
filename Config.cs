@@ -18,6 +18,7 @@ sealed class Config
     public bool BgRemove { get; set; } = false;
     public string BgKey { get; set; } = "#FFFFFF";
     public int BgTol { get; set; } = 5;
+    public string Language { get; set; } = "auto";   // auto | ru | en
     public bool CopyOnSave { get; set; } = true;
     public bool CloseAfter { get; set; } = true;
     public int Version { get; set; } = 2;

@@ -77,6 +77,23 @@ static class Theme
         return g;
     }
 
+    public static FrameworkElement CheckerIcon()
+    {
+        var tile = new DrawingGroup();
+        using (var g = tile.Open())
+        {
+            g.DrawRectangle(Brush(Color.FromRgb(0xE6, 0xE6, 0xE6)), null, new Rect(0, 0, 8, 8));
+            g.DrawRectangle(Brush(Color.FromRgb(0x6A, 0x6A, 0x6A)), null, new Rect(0, 0, 4, 4));
+            g.DrawRectangle(Brush(Color.FromRgb(0x6A, 0x6A, 0x6A)), null, new Rect(4, 4, 4, 4));
+        }
+        return new Border
+        {
+            Width = 20, Height = 20, CornerRadius = new CornerRadius(2), IsHitTestVisible = false,
+            BorderBrush = Brush(Color.FromRgb(0xBB, 0xBB, 0xBB)), BorderThickness = new Thickness(1),
+            Background = new DrawingBrush(tile) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, 8, 8), ViewportUnits = BrushMappingMode.Absolute },
+        };
+    }
+
     public static FrameworkElement BalloonIcon() => new System.Windows.Shapes.Path
     {
         Data = Geometry.Parse("M 4,3 L 17,3 Q 19,3 19,5 L 19,12 Q 19,14 17,14 L 11,14 L 6,19 L 7,14 L 4,14 Q 2,14 2,12 L 2,5 Q 2,3 4,3 Z"),
@@ -117,7 +134,7 @@ sealed class EditorWindow : Window
     Border cropBar = null!;
     ScrollViewer scroll = null!;
     readonly Slider zoomSlider = new() { Minimum = 10, Maximum = 400, Value = 100, Width = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
-    readonly Button zoomLbl = new() { Content = "100%", Width = 52, Focusable = false, ToolTip = "Сбросить масштаб (Ctrl+0)", Margin = new Thickness(8, 4, 2, 4) };
+    readonly Button zoomLbl = new() { Content = "100%", Width = 60, Padding = new Thickness(2, 2, 2, 2), Focusable = false, ToolTip = Loc.T("Сбросить масштаб (Ctrl+0)"), Margin = new Thickness(8, 4, 2, 4) };
     ToggleButton bgToggle = null!, pipette = null!;
     WrapPanel bgRow = null!;
     Border keySwatch = null!;
@@ -179,35 +196,28 @@ sealed class EditorWindow : Window
 
         // ---- row 1: primitives
         foreach (var (tool, icon, label, tip) in new (Tool, UIElement, string, string)[] {
-            (Tool.Select, Theme.CursorIcon(), "Выбор", "Выбрать и преобразовать (V). Клик по выбранному — режим поворота. Ctrl — временно"),
-            (Tool.Arrow, Theme.Icon("arrow"), "Стрелка", "A"),
-            (Tool.Line, Theme.Icon("line"), "Линия", "L"),
-            (Tool.Rect, Theme.Icon("rect"), "Рамка", "R"),
-            (Tool.Ellipse, Theme.Icon("ellipse"), "Овал", "O"),
-            (Tool.Balloon, Theme.BalloonIcon(), "Выноска", "Выноска с указателем (K). Узел — куда указывает"),
-            (Tool.Text, Theme.Icon("text"), "Текст", "T"),
-            (Tool.Marker, Theme.Icon("marker"), "Маркер", "Выделитель (M)"),
-            (Tool.Blur, Theme.Icon("blur"), "Размыть", "Пикселизация области (B)"),
-            (Tool.Crop, Theme.Icon("crop"), "Обрезать", "Обрезка (C). Enter — применить, Esc — отмена") })
+            (Tool.Select, Theme.CursorIcon(), Loc.T("Выбор"), Loc.T("Выбрать и преобразовать (V). Клик по выбранному — режим поворота. Ctrl — временно")),
+            (Tool.Arrow, Theme.Icon("arrow"), Loc.T("Стрелка"), "A"),
+            (Tool.Line, Theme.Icon("line"), Loc.T("Линия"), "L"),
+            (Tool.Rect, Theme.Icon("rect"), Loc.T("Рамка"), "R"),
+            (Tool.Ellipse, Theme.Icon("ellipse"), Loc.T("Овал"), "O"),
+            (Tool.Balloon, Theme.BalloonIcon(), Loc.T("Выноска"), Loc.T("Выноска с указателем (K). Узел — куда указывает")),
+            (Tool.Text, Theme.Icon("text"), Loc.T("Текст"), "T"),
+            (Tool.Marker, Theme.Icon("marker"), Loc.T("Маркер"), Loc.T("Выделитель (M)")),
+            (Tool.Blur, Theme.Icon("blur"), Loc.T("Размыть"), Loc.T("Пикселизация области (B)")),
+            (Tool.Crop, Theme.Icon("crop"), Loc.T("Обрезать"), Loc.T("Обрезка (C). Enter — применить, Esc — отмена")) })
         {
             var t = tool;
             var b = new ToggleButton { Content = Label(icon, label), ToolTip = tip, Style = iconToggle, Focusable = false };
             b.Click += (_, _) => SetTool(t);
             toolButtons[tool] = b; Add(row1, b, 2);
         }
-        var pasteBtn = new Button
-        {
-            Content = new TextBlock { Text = "Вставить", Foreground = Theme.Brush(Theme.Text) }, Style = iconButton, Focusable = false,
-            ToolTip = "Вставить изображение из буфера (Ctrl+V) — или перетащите файл в окно",
-        };
-        pasteBtn.Click += (_, _) => Paste();
-        Add(row1, pasteBtn, 2);
         AllowDrop = true;
         Drop += OnDrop;
         bgToggle = new ToggleButton
         {
-            Content = new TextBlock { Text = "Убрать фон", Foreground = Theme.Brush(Theme.Text) }, Style = iconToggle, Focusable = false,
-            IsChecked = cfg.BgRemove, ToolTip = "Прозрачный фон: выбранный цвет станет прозрачным при сохранении в PNG и копировании",
+            Content = Theme.CheckerIcon(), Style = iconToggle, Focusable = false, Padding = new Thickness(6),
+            IsChecked = cfg.BgRemove, ToolTip = Loc.T("Прозрачный фон: выбранный цвет станет прозрачным при сохранении в PNG и копировании"),
         };
         bgToggle.Click += (_, _) =>
         {
@@ -220,7 +230,7 @@ sealed class EditorWindow : Window
 
         // ---- row 2: options (arrow style / text background, colour, thickness, undo)
         var ag = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
-        foreach (var (v, icon, tip) in new[] { (0, "arrow_normal", "Обычная стрелка"), (1, "arrow_taper", "Сужающаяся стрелка"), (2, "arrow_dots", "Пунктирная изогнутая стрелка (средний узел — изгиб)") })
+        foreach (var (v, icon, tip) in new[] { (0, "arrow_normal", Loc.T("Обычная стрелка")), (1, "arrow_taper", Loc.T("Сужающаяся стрелка")), (2, "arrow_dots", Loc.T("Пунктирная изогнутая стрелка (средний узел — изгиб)")) })
         {
             var vv = v;
             var b = new ToggleButton { Content = Theme.Icon(icon), ToolTip = tip, Style = iconToggle, Focusable = false, Padding = new Thickness(6, 5, 6, 5) };
@@ -230,8 +240,8 @@ sealed class EditorWindow : Window
         arrowGroup = ag; row2.Children.Add(ag);
 
         var tg = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
-        tg.Children.Add(new TextBlock { Text = "Фон текста", Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = dim });
-        foreach (var (v, tip) in new[] { (1, "Светлый фон"), (2, "Тёмный фон"), (0, "Без фона") })
+        tg.Children.Add(new TextBlock { Text = Loc.T("Фон текста"), Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = dim });
+        foreach (var (v, tip) in new[] { (1, Loc.T("Светлый фон")), (2, Loc.T("Тёмный фон")), (0, Loc.T("Без фона")) })
         {
             var vv = v;
             var b = new ToggleButton { Content = Theme.BgIcon(v), ToolTip = tip, Style = iconToggle, Focusable = false, Padding = new Thickness(5) };
@@ -251,7 +261,7 @@ sealed class EditorWindow : Window
             sw.MouseLeftButtonUp += (_, _) => SetColor(h);
             swatches.Add((hex, sw)); Add(row2, sw, 6);
         }
-        var more = new Button { Content = new TextBlock { Text = "…", Foreground = Theme.Brush(Theme.Text) }, ToolTip = "Другой цвет", Width = 26, Style = iconButton, Focusable = false };
+        var more = new Button { Content = new TextBlock { Text = "…", Foreground = Theme.Brush(Theme.Text) }, ToolTip = Loc.T("Другой цвет"), Width = 26, Style = iconButton, Focusable = false };
         more.Click += (_, _) =>
         {
             using var d = new System.Windows.Forms.ColorDialog { FullOpen = true };
@@ -260,7 +270,7 @@ sealed class EditorWindow : Window
         };
         Add(row2, more, 10);
 
-        foreach (var (w, icon, tip) in new[] { (2.0, "thin", "Тонкая"), (5.0, "mid", "Средняя"), (10.0, "thick", "Толстая") })
+        foreach (var (w, icon, tip) in new[] { (2.0, "thin", Loc.T("Тонкая")), (5.0, "mid", Loc.T("Средняя")), (10.0, "thick", Loc.T("Толстая")) })
         {
             var ww = w;
             var b = new ToggleButton { Content = Theme.Icon(icon), ToolTip = tip, Style = iconToggle, Focusable = false, Padding = new Thickness(6) };
@@ -278,17 +288,17 @@ sealed class EditorWindow : Window
         Add(row2, width, 0); Add(row2, widthLbl, 10);
         foreach (var (pw, pb) in presets) pb.IsChecked = Math.Abs(pw - cfg.Width) < 0.01;
 
-        undoBtn = new Button { Content = Theme.Icon("undo"), ToolTip = "Отменить (Ctrl+Z)", Style = iconButton, Focusable = false };
-        redoBtn = new Button { Content = Theme.Icon("redo"), ToolTip = "Повторить (Ctrl+Y)", Style = iconButton, Focusable = false };
+        undoBtn = new Button { Content = Theme.Icon("undo"), ToolTip = Loc.T("Отменить (Ctrl+Z)"), Style = iconButton, Focusable = false };
+        redoBtn = new Button { Content = Theme.Icon("redo"), ToolTip = Loc.T("Повторить (Ctrl+Y)"), Style = iconButton, Focusable = false };
         undoBtn.Click += (_, _) => view.Undo(); redoBtn.Click += (_, _) => view.Redo();
         Add(row2, undoBtn, 2); Add(row2, redoBtn, 0);
 
         // ---- row 3: background removal options (only while enabled)
-        Add(row3, new TextBlock { Text = "Удалить цвет:", VerticalAlignment = VerticalAlignment.Center, Foreground = dim }, 6);
+        Add(row3, new TextBlock { Text = Loc.T("Удалить цвет:"), VerticalAlignment = VerticalAlignment.Center, Foreground = dim }, 6);
         keySwatch = new Border
         {
             Width = 26, Height = 22, CornerRadius = new CornerRadius(3), Cursor = Cursors.Hand, BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1),
-            ToolTip = "Цвет фона (клик — выбрать из палитры)",
+            ToolTip = Loc.T("Цвет фона (клик — выбрать из палитры)"),
         };
         keySwatch.MouseLeftButtonUp += (_, _) =>
         {
@@ -299,15 +309,15 @@ sealed class EditorWindow : Window
         pipette = new ToggleButton
         {
             Content = new TextBlock { Text = "\uEF3C", FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 15, Foreground = Theme.Brush(Theme.Text) },
-            Style = iconToggle, Focusable = false, Padding = new Thickness(6), ToolTip = "Пипетка: кликните по цвету фона на картинке",
+            Style = iconToggle, Focusable = false, Padding = new Thickness(6), ToolTip = Loc.T("Пипетка: кликните по цвету фона на картинке"),
         };
         pipette.Click += (_, _) => view.PickMode = pipette.IsChecked == true;
         view.ColorPicked += c => { pipette.IsChecked = false; SetKey(c); };
         Add(row3, pipette, 2);
-        var white = new Button { Content = new TextBlock { Text = "Белый", Foreground = Theme.Brush(Theme.Text) }, Style = iconButton, Focusable = false, ToolTip = "Вернуть белый цвет" };
+        var white = new Button { Content = new TextBlock { Text = Loc.T("Белый"), Foreground = Theme.Brush(Theme.Text) }, Style = iconButton, Focusable = false, ToolTip = Loc.T("Вернуть белый цвет") };
         white.Click += (_, _) => SetKey(Colors.White);
         Add(row3, white, 10);
-        Add(row3, new TextBlock { Text = "Допуск", VerticalAlignment = VerticalAlignment.Center, Foreground = dim }, 6);
+        Add(row3, new TextBlock { Text = Loc.T("Допуск"), VerticalAlignment = VerticalAlignment.Center, Foreground = dim }, 6);
         tolSlider = new Slider { Minimum = 0, Maximum = 50, Width = 140, Value = cfg.BgTol, VerticalAlignment = VerticalAlignment.Center, IsSnapToTickEnabled = true, TickFrequency = 1 };
         tolLbl = new TextBlock { Width = 36, VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Text), Text = cfg.BgTol + "%" };
         tolSlider.ValueChanged += (_, ev) => { cfg.BgTol = (int)ev.NewValue; tolLbl.Text = cfg.BgTol + "%"; cfg.Save(); ApplyBg(); };
@@ -319,8 +329,8 @@ sealed class EditorWindow : Window
         var toolbarBox = new Border { Background = Theme.Brush(Theme.Surface), BorderBrush = line, BorderThickness = new Thickness(0, 0, 0, 1), Child = toolbar };
 
         // ---- crop bar (visible only in crop mode)
-        var apply = new Button { Content = "Применить", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 0), Focusable = false, Background = Theme.Brush(Color.FromRgb(0xF5, 0xD1, 0x42)), Foreground = Brushes.Black };
-        var cancel = new Button { Content = "Отмена", Padding = new Thickness(12, 4, 12, 4), Focusable = false };
+        var apply = new Button { Content = Loc.T("Применить"), Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 0), Focusable = false, Background = Theme.Brush(Color.FromRgb(0xF5, 0xD1, 0x42)), Foreground = Brushes.Black };
+        var cancel = new Button { Content = Loc.T("Отмена"), Padding = new Thickness(12, 4, 12, 4), Focusable = false };
         apply.Click += (_, _) => ApplyCrop(); cancel.Click += (_, _) => CancelCrop();
         cropBar = new Border
         {
@@ -332,8 +342,8 @@ sealed class EditorWindow : Window
         // ---- bottom bar: status + actions
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
         foreach (var (text, tip, act) in new (string, string, Action)[] {
-            ("Копировать", "Ctrl+C", Copy), ("Копировать путь", "Ctrl+Shift+C — путь к файлу в папке сохранения (файл создаётся, если ещё не сохранён)", CopyPath),
-            ("Сохранить", "Ctrl+S", Save), ("Сохранить как…", "Ctrl+Shift+S", SaveAs) })
+            (Loc.T("Копировать"), "Ctrl+C", Copy), (Loc.T("Копировать путь"), Loc.T("Ctrl+Shift+C — путь к файлу в папке сохранения (файл создаётся, если ещё не сохранён)"), CopyPath),
+            (Loc.T("Сохранить"), "Ctrl+S", Save), (Loc.T("Сохранить как…"), "Ctrl+Shift+S", SaveAs) })
         {
             var b = new Button { Content = text, ToolTip = tip, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(6, 6, 0, 6), Focusable = false };
             b.Click += (_, _) => act();
@@ -345,8 +355,8 @@ sealed class EditorWindow : Window
         bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         status.VerticalAlignment = VerticalAlignment.Center; status.TextTrimming = TextTrimming.CharacterEllipsis;
 
-        var zoomMinus = new Button { Content = "−", Width = 26, Focusable = false, ToolTip = "Уменьшить (Ctrl+колесо)", Style = iconButton, Padding = new Thickness(0, 2, 0, 2) };
-        var zoomPlus = new Button { Content = "+", Width = 26, Focusable = false, ToolTip = "Увеличить (Ctrl+колесо)", Style = iconButton, Padding = new Thickness(0, 2, 0, 2) };
+        var zoomMinus = new Button { Content = "−", Width = 26, Focusable = false, ToolTip = Loc.T("Уменьшить (Ctrl+колесо)"), Style = iconButton, Padding = new Thickness(0, 2, 0, 2) };
+        var zoomPlus = new Button { Content = "+", Width = 26, Focusable = false, ToolTip = Loc.T("Увеличить (Ctrl+колесо)"), Style = iconButton, Padding = new Thickness(0, 2, 0, 2) };
         zoomMinus.Foreground = zoomPlus.Foreground = Theme.Brush(Theme.Text);
         zoomMinus.Click += (_, _) => ApplyZoom(view.Zoom - 0.1);
         zoomPlus.Click += (_, _) => ApplyZoom(view.Zoom + 0.1);
@@ -385,8 +395,8 @@ sealed class EditorWindow : Window
         {
             if (!panning) return;
             var p = ev.GetPosition(scroll);
-            scroll.ScrollToHorizontalOffset(panH - (p.X - panStart.X));
-            scroll.ScrollToVerticalOffset(panV - (p.Y - panStart.Y));
+            view.AddPan(new Vector((p.X - panStart.X) * view.S, (p.Y - panStart.Y) * view.S));
+            panStart = p;
         };
         scroll.PreviewMouseUp += (_, ev) =>
         {
@@ -435,8 +445,12 @@ sealed class EditorWindow : Window
         view.SetZoom(z);
         view.UpdateLayout();
         var na = view.ImageToView(img);
-        scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset + (na.X - a.X));
-        scroll.ScrollToVerticalOffset(scroll.VerticalOffset + (na.Y - a.Y));
+        double h0 = scroll.HorizontalOffset, v0 = scroll.VerticalOffset;
+        scroll.ScrollToHorizontalOffset(h0 + (na.X - a.X));
+        scroll.ScrollToVerticalOffset(v0 + (na.Y - a.Y));
+        scroll.UpdateLayout();
+        double rx = (na.X - a.X) - (scroll.HorizontalOffset - h0), ry = (na.Y - a.Y) - (scroll.VerticalOffset - v0);
+        if (Math.Abs(rx) > 0.01 || Math.Abs(ry) > 0.01) view.AddPan(new Vector(-rx * view.S, -ry * view.S));
     }
 
     protected override void OnPreviewMouseWheel(MouseWheelEventArgs e)
@@ -480,10 +494,10 @@ sealed class EditorWindow : Window
             else if (Clipboard.ContainsImage()) { bmp = Clipboard.GetImage(); bmp?.Freeze(); }
             else if (Clipboard.ContainsFileDropList())
                 foreach (var f in Clipboard.GetFileDropList()) { bmp = f == null ? null : LoadFile(f); if (bmp != null) break; }
-            if (bmp == null) { status.Text = "В буфере нет изображения"; return; }
+            if (bmp == null) { status.Text = Loc.T("В буфере нет изображения"); return; }
             PlaceImage(bmp, null);
         }
-        catch (Exception ex) { status.Text = "Не удалось вставить: " + ex.Message; }
+        catch (Exception ex) { status.Text = Loc.T("Не удалось вставить: ") + ex.Message; }
     }
 
     void OnDrop(object sender, DragEventArgs e)
@@ -493,10 +507,10 @@ sealed class EditorWindow : Window
             BitmapSource? bmp = null;
             if (e.Data.GetDataPresent(DataFormats.FileDrop) && e.Data.GetData(DataFormats.FileDrop) is string[] files)
                 foreach (var f in files) { bmp = LoadFile(f); if (bmp != null) break; }
-            if (bmp == null) { status.Text = "Это не изображение"; return; }
+            if (bmp == null) { status.Text = Loc.T("Это не изображение"); return; }
             PlaceImage(bmp, e.GetPosition(view));
         }
-        catch (Exception ex) { status.Text = "Не удалось вставить: " + ex.Message; }
+        catch (Exception ex) { status.Text = Loc.T("Не удалось вставить: ") + ex.Message; }
     }
 
     /// <summary>Add the bitmap as a selectable object (at a view point, or the middle of the visible area).</summary>
@@ -506,7 +520,7 @@ sealed class EditorWindow : Window
         SetTool(Tool.Select);
         var c = viewPoint ?? scroll.TranslatePoint(new Point(scroll.ViewportWidth / 2, scroll.ViewportHeight / 2), view);
         view.AddImage(bmp, view.ViewToImage(c));
-        status.Text = "Изображение вставлено — тяните за рамку, Delete — удалить";
+        status.Text = Loc.T("Изображение вставлено — тяните за рамку, Delete — удалить");
     }
 
     void SetKeySwatch() => keySwatch.Background = new SolidColorBrush(KeyColor);
@@ -535,6 +549,19 @@ sealed class EditorWindow : Window
     public void SaveTest(string path) => WriteFile(path);
     public void TestZoom(double z) => ApplyZoom(z);
     public void TestCopyPath() => CopyPath();
+
+    /// <summary>Neutral demo annotations for the README screenshots (debug hook).</summary>
+    public void AddDemo()
+    {
+        view.Items.Add(new MarkerAnn { Color = Colors.Gold, W = 1, A = new Point(518, 137), B = new Point(714, 137) });
+        view.Items.Add(new RectAnn { Color = Color.FromRgb(0xE5, 0x48, 0x3B), W = 3, A = new Point(364, 226), B = new Point(452, 366) });
+        view.Items.Add(new ArrowAnn { Color = Color.FromRgb(0xE5, 0x48, 0x3B), W = 4, Style = 1, A = new Point(380, 70), B = new Point(302, 124) });
+        view.Items.Add(new BlurAnn { W = 2, A = new Point(518, 200), B = new Point(704, 220) });
+        view.Items.Add(new TextAnn { Color = Color.FromRgb(0x20, 0x63, 0xCC), W = 2, A = new Point(496, 300), B = new Point(496, 300), Text = "Costs above plan" });
+        view.Items.Add(new BalloonAnn { Color = Color.FromRgb(0x20, 0x63, 0xCC), W = 3, A = new Point(484, 286), B = new Point(676, 334), Tip = new Point(458, 312), AutoTip = false });
+        view.Select(view.Items[^1]);
+        SetTool(Tool.Select);
+    }
 
     public void AddSamples()
     {
@@ -734,7 +761,7 @@ sealed class EditorWindow : Window
             Directory.CreateDirectory(cfg.SaveDir);
             WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()), forceCopy: true);   // always saved to the folder too
         }
-        catch (Exception ex) { status.Text = "Не удалось сохранить: " + ex.Message; }
+        catch (Exception ex) { status.Text = Loc.T("Не удалось сохранить: ") + ex.Message; }
     }
 
     void Save()
@@ -744,7 +771,7 @@ sealed class EditorWindow : Window
             Directory.CreateDirectory(cfg.SaveDir);
             WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()));
         }
-        catch (Exception ex) { status.Text = "Не удалось сохранить: " + ex.Message; }
+        catch (Exception ex) { status.Text = Loc.T("Не удалось сохранить: ") + ex.Message; }
     }
 
     void SaveAs()
@@ -757,7 +784,7 @@ sealed class EditorWindow : Window
         if (d.ShowDialog(this) == true)
         {
             try { WriteFile(d.FileName); }
-            catch (Exception ex) { status.Text = "Не удалось сохранить: " + ex.Message; }
+            catch (Exception ex) { status.Text = Loc.T("Не удалось сохранить: ") + ex.Message; }
         }
     }
 
@@ -771,8 +798,8 @@ sealed class EditorWindow : Window
         using (var fs = File.Create(path)) enc.Save(fs);
         lastPath = path; dirty = false;
         if (forPath) return;
-        if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp, alpha: !jpg && view.KeyedImage != null); } catch (Exception ex) { status.Text = "Буфер обмена: " + ex.Message; } }
-        Finish((forceCopy ? "Скопировано и сохранено: " : "Сохранено: ") + path);
+        if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp, alpha: !jpg && view.KeyedImage != null); } catch (Exception ex) { status.Text = Loc.T("Буфер обмена: ") + ex.Message; } }
+        Finish((forceCopy ? Loc.T("Скопировано и сохранено: ") : Loc.T("Сохранено: ")) + path);
     }
 
     /// <summary>Copies the file path as text; the image is saved first if it has not been saved yet or was edited since.</summary>
@@ -786,8 +813,8 @@ sealed class EditorWindow : Window
                 WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()), forPath: true);
             }
             Clipboard.SetText(lastPath!);
-            Finish("Путь скопирован: " + lastPath);
+            Finish(Loc.T("Путь скопирован: ") + lastPath);
         }
-        catch (Exception ex) { status.Text = "Не удалось скопировать путь: " + ex.Message; }
+        catch (Exception ex) { status.Text = Loc.T("Не удалось скопировать путь: ") + ex.Message; }
     }
 }

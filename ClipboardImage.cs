@@ -48,7 +48,7 @@ static class ClipboardImage
         for (int attempt = 0; ; attempt++)
         {
             if (OpenClipboard(IntPtr.Zero)) break;
-            if (attempt >= 20) throw new InvalidOperationException("Буфер обмена занят другой программой");
+            if (attempt >= 20) throw new InvalidOperationException(Loc.T("Буфер обмена занят другой программой"));
             Thread.Sleep(30);
         }
         try

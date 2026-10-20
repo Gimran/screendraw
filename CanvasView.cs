@@ -31,7 +31,19 @@ sealed class CanvasView : FrameworkElement
     double M => PadDip * S;                         // margin in device pixels
 
     /// <summary>Top-left of the image in view device pixels: centred, never closer than the margin to the edge.</summary>
-    Point Origin => new(Math.Floor(Math.Max(M, (ActualWidth * S - Image.PixelWidth * Zoom) / 2)), Math.Floor(Math.Max(M, (ActualHeight * S - Image.PixelHeight * Zoom) / 2)));
+    Point Origin => new(Math.Floor(Math.Max(M, (ActualWidth * S - Image.PixelWidth * Zoom) / 2)) + Pan.X,
+                        Math.Floor(Math.Max(M, (ActualHeight * S - Image.PixelHeight * Zoom) / 2)) + Pan.Y);
+
+    /// <summary>Extra offset (device px) from middle-button dragging; lets the picture be moved even when it fits the window.</summary>
+    public Vector Pan { get; private set; }
+
+    public void AddPan(Vector deviceDelta)
+    {
+        double lx = Math.Max(ActualWidth * S, 200), ly = Math.Max(ActualHeight * S, 200);
+        var p = Pan + deviceDelta;
+        Pan = new Vector(Math.Clamp(p.X, -lx, lx), Math.Clamp(p.Y, -ly, ly));
+        InvalidateVisual();
+    }
     public Vector OriginDip { get { var o = Origin; return new Vector(o.X / S, o.Y / S); } }
 
     public BitmapSource Image { get; private set; }
