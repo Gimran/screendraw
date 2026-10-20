@@ -64,16 +64,8 @@ sealed class Controller : IDisposable
 
     static Drawing.Icon MakeIcon()
     {
-        using var bmp = new Drawing.Bitmap(32, 32);
-        using (var g = Drawing.Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using var p1 = new Drawing.Pen(Drawing.Color.FromArgb(0x3A, 0x7B, 0xD5), 3);
-            using var p2 = new Drawing.Pen(Drawing.Color.FromArgb(0xE5, 0x48, 0x3B), 3);
-            g.DrawRectangle(p1, 4, 7, 24, 18);
-            g.DrawLine(p2, 9, 21, 23, 11);
-        }
-        return Drawing.Icon.FromHandle(bmp.GetHicon());
+        var res = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/app.ico"));
+        return new Drawing.Icon(res.Stream);
     }
 
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

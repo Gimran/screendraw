@@ -9,9 +9,11 @@
     <AssemblyName>ScreenDraw</AssemblyName>
     <RootNamespace>ScreenDraw</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <NoWarn>WFO0003;WPF0001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Resource Include="Assets\*.png" />
+    <Resource Include="Assets/*.png" />
+    <Resource Include="Assets/app.ico" />
   </ItemGroup>
 </Project>

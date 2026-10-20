@@ -61,6 +61,9 @@ static class Theme
         return im;
     }
 
+    static BitmapFrame? appIcon;
+    public static BitmapFrame AppIcon => appIcon ??= BitmapFrame.Create(new Uri("pack://application:,,,/Assets/app.png"));
+
     public static FrameworkElement BgIcon(int v)
     {
         var g = new Grid { Width = 20, Height = 20, IsHitTestVisible = false };
@@ -110,6 +113,7 @@ sealed class EditorWindow : Window
         this.cfg = cfg;
         Resources.MergedDictionaries.Add(Theme.Styles);
         Title = "ScreenDraw";
+        Icon = Theme.AppIcon;
         Background = Theme.Brush(Theme.Bg);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SizeToContent = SizeToContent.WidthAndHeight;

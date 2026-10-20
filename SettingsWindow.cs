@@ -15,6 +15,7 @@ sealed class SettingsWindow : Window
     public SettingsWindow(Config cfg)
     {
         Title = "ScreenDraw — настройки";
+        Icon = Theme.AppIcon;
         SizeToContent = SizeToContent.WidthAndHeight;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
