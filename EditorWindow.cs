@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -183,6 +184,15 @@ sealed class EditorWindow : Window
             b.Click += (_, _) => SetTool(t);
             toolButtons[tool] = b; Add(row1, b, 2);
         }
+        var pasteBtn = new Button
+        {
+            Content = new TextBlock { Text = "Вставить", Foreground = Theme.Brush(Theme.Text) }, Style = iconButton, Focusable = false,
+            ToolTip = "Вставить изображение из буфера (Ctrl+V) — или перетащите файл в окно",
+        };
+        pasteBtn.Click += (_, _) => Paste();
+        Add(row1, pasteBtn, 2);
+        AllowDrop = true;
+        Drop += OnDrop;
 
         // ---- row 2: options (arrow style / text background, colour, thickness, undo)
         var ag = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
@@ -361,6 +371,65 @@ sealed class EditorWindow : Window
         base.OnPreviewMouseWheel(e);
     }
 
+    // ---------------------------------------------------------------- pasted / dropped images
+    static readonly string[] ImageExt = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp", ".ico" };
+
+    static BitmapSource? LoadFile(string path)
+    {
+        if (!ImageExt.Contains(System.IO.Path.GetExtension(path).ToLowerInvariant())) return null;
+        try
+        {
+            var b = new BitmapImage();
+            b.BeginInit(); b.CacheOption = BitmapCacheOption.OnLoad; b.UriSource = new Uri(path); b.EndInit(); b.Freeze();
+            return b;
+        }
+        catch { return null; }
+    }
+
+    void Paste()
+    {
+        try
+        {
+            BitmapSource? bmp = null;
+            var data = Clipboard.GetDataObject();
+            if (data?.GetDataPresent("PNG") == true && data.GetData("PNG") is Stream ps)
+            {
+                ps.Position = 0;
+                var f = new PngBitmapDecoder(ps, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
+                f.Freeze(); bmp = f;
+            }
+            else if (Clipboard.ContainsImage()) { bmp = Clipboard.GetImage(); bmp?.Freeze(); }
+            else if (Clipboard.ContainsFileDropList())
+                foreach (var f in Clipboard.GetFileDropList()) { bmp = f == null ? null : LoadFile(f); if (bmp != null) break; }
+            if (bmp == null) { status.Text = "В буфере нет изображения"; return; }
+            PlaceImage(bmp, null);
+        }
+        catch (Exception ex) { status.Text = "Не удалось вставить: " + ex.Message; }
+    }
+
+    void OnDrop(object sender, DragEventArgs e)
+    {
+        try
+        {
+            BitmapSource? bmp = null;
+            if (e.Data.GetDataPresent(DataFormats.FileDrop) && e.Data.GetData(DataFormats.FileDrop) is string[] files)
+                foreach (var f in files) { bmp = LoadFile(f); if (bmp != null) break; }
+            if (bmp == null) { status.Text = "Это не изображение"; return; }
+            PlaceImage(bmp, e.GetPosition(view));
+        }
+        catch (Exception ex) { status.Text = "Не удалось вставить: " + ex.Message; }
+    }
+
+    /// <summary>Add the bitmap as a selectable object (at a view point, or the middle of the visible area).</summary>
+    void PlaceImage(BitmapSource bmp, Point? viewPoint)
+    {
+        CommitText();
+        SetTool(Tool.Select);
+        var c = viewPoint ?? scroll.TranslatePoint(new Point(scroll.ViewportWidth / 2, scroll.ViewportHeight / 2), view);
+        view.AddImage(bmp, view.ViewToImage(c));
+        status.Text = "Изображение вставлено — тяните за рамку, Delete — удалить";
+    }
+
     void SetToolButtons(Tool t) { foreach (var (k, b) in toolButtons) b.IsChecked = k == t; }
 
     void UpdateContext()
@@ -385,6 +454,10 @@ sealed class EditorWindow : Window
         view.Items.Add(new MarkerAnn { Color = Colors.Gold, W = 4, A = new Point(20, 80), B = new Point(220, 80) });
         view.Items.Add(new BlurAnn { W = 4, A = new Point(250, 20), B = new Point(380, 70) });
         view.Items.Add(new BalloonAnn { Color = Colors.Orange, W = 3, A = new Point(40, 100), B = new Point(200, 160) });
+        var px = new byte[60 * 40 * 4];
+        for (int i = 0; i < 60 * 40; i++) { px[i * 4] = (byte)(i % 60 * 4); px[i * 4 + 1] = (byte)(i / 60 * 6); px[i * 4 + 2] = 200; px[i * 4 + 3] = 255; }
+        var sample = BitmapSource.Create(60, 40, 96, 96, PixelFormats.Bgra32, null, px, 60 * 4); sample.Freeze();
+        view.Items.Add(new ImageAnn { Src = sample, A = new Point(300, 10), B = new Point(420, 90), Rot = 12 });
         view.Select(view.Items[^1]);
         SetTool(Tool.Select);
     }
@@ -512,6 +585,7 @@ sealed class EditorWindow : Window
             case Key.OemPlus or Key.Add when ctrl: ApplyZoom(view.Zoom + 0.1); break;
             case Key.OemMinus or Key.Subtract when ctrl: ApplyZoom(view.Zoom - 0.1); break;
             case Key.Delete: case Key.Back: view.DeleteSelected(); break;
+            case Key.V when ctrl: Paste(); break;
             case Key.V when !ctrl: SetTool(Tool.Select); break;
             case Key.A when !ctrl: SetTool(Tool.Arrow); break;
             case Key.L when !ctrl: SetTool(Tool.Line); break;

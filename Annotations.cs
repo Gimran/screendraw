@@ -34,6 +34,8 @@ abstract class Ann
     public virtual bool CanRotate => true;
     /// <summary>Show the 8-handle bounding box when selected (arrows only use their end nodes).</summary>
     public virtual bool ShowBox => true;
+    /// <summary>Corner handles keep the aspect ratio (pasted images).</summary>
+    public virtual bool KeepAspect => false;
     /// <summary>Nodes with index below this are line-like end points (the opposite end stays pinned while dragging).</summary>
     public virtual int EndpointCount => 2;
     /// <summary>Box used to decide whether the canvas must grow (may be larger than the geometry box).</summary>
@@ -472,4 +474,22 @@ sealed class BalloonAnn : Ann
     public override Point[] Nodes() => new[] { TipPt() };
     public override void SetNode(int i, Point p) { Tip = p; AutoTip = false; }
     public override void Move(Vector v) { A += v; B += v; Tip += v; }
+}
+
+/// <summary>An image pasted / dropped onto the canvas; moves, scales and rotates like any other object.</summary>
+sealed class ImageAnn : Ann
+{
+    public BitmapSource? Src;
+    public override double StrokeHalf => 0;
+    public override bool KeepAspect => true;
+    protected override void DrawLocal(DrawingContext dc) { if (Src != null) dc.DrawImage(Src, new Rect(A, B)); }
+    public override bool HitLocal(Point p, double tol) { var r = new Rect(A, B); r.Inflate(tol, tol); return r.Contains(p); }
+    public override Rect GeomBox() => new(A, B);
+    public override Ann Clone() => CopyTo(new ImageAnn());
+    public override void Assign(Ann o)
+    {
+        base.Assign(o);
+        if (o is ImageAnn i) Src = i.Src;
+    }
+    public override void ScaleAbout(Point anchor, double sx, double sy) => ScaleAB(anchor, sx, sy);
 }

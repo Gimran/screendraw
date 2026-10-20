@@ -346,6 +346,20 @@ sealed class CanvasView : FrameworkElement
         InvalidateVisual();
     }
 
+    /// <summary>Put a pasted / dropped bitmap on the canvas centred at <paramref name="centre"/> (image coordinates).</summary>
+    public void AddImage(BitmapSource src, Point centre)
+    {
+        double w = src.PixelWidth, h = src.PixelHeight;
+        double k = Math.Min(1, Math.Min(0.8 * Image.PixelWidth / w, 0.8 * Image.PixelHeight / h));
+        w *= k; h *= k;
+        var a = new ImageAnn { Src = src, A = new Point(centre.X - w / 2, centre.Y - h / 2), B = new Point(centre.X + w / 2, centre.Y + h / 2) };
+        PushUndo(Snapshot());
+        Items.Add(a);
+        Select(a);
+        FitCanvas();
+        InvalidateVisual();
+    }
+
     public void EndTextEdit() { RotateMode = false; }
 
     // ---------------------------------------------------------------- canvas growth
@@ -664,6 +678,7 @@ sealed class CanvasView : FrameworkElement
         double sx = 1, sy = 1;
         if (d.X != 0 && Math.Abs(hx - anchor.X) > 0.5) sx = Math.Max((tx - anchor.X) / (hx - anchor.X), 0.03);
         if (d.Y != 0 && Math.Abs(hy - anchor.Y) > 0.5) sy = Math.Max((ty - anchor.Y) / (hy - anchor.Y), 0.03);
+        if (o.KeepAspect && d.X != 0 && d.Y != 0) sx = sy = Math.Max(sx, sy);
 
         var t = o.Clone();
         t.ScaleAbout(anchor, sx, sy);
