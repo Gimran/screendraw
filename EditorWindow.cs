@@ -268,7 +268,7 @@ sealed class EditorWindow : Window
         bottom.Children.Add(status); bottom.Children.Add(actions);
         var bottomBox = new Border { BorderBrush = line, BorderThickness = new Thickness(0, 1, 0, 0), Child = bottom };
 
-        var stage = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8) };
+        var stage = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         stage.Children.Add(view);
         stage.Children.Add(overlay);
         var scroll = new ScrollViewer
@@ -392,7 +392,7 @@ sealed class EditorWindow : Window
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x5B, 0x8D, 0xEF)), BorderThickness = new Thickness(1), Padding = new Thickness(0), MinWidth = 80,
             CaretBrush = Brushes.White,
         };
-        Canvas.SetLeft(tb, imgPos.X / s - 1); Canvas.SetTop(tb, imgPos.Y / s - 1);
+        Canvas.SetLeft(tb, imgPos.X / s + CanvasView.PadDip - 1); Canvas.SetTop(tb, imgPos.Y / s + CanvasView.PadDip - 1);
         view.Hidden = existing;
         overlay.Children.Add(tb);
         view.InvalidateVisual();

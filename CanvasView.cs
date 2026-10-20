@@ -26,6 +26,10 @@ sealed class CanvasView : FrameworkElement
     // handle order: TL, T, TR, R, BR, B, BL, L
     static readonly Vector[] Dirs = { new(-1, -1), new(0, -1), new(1, -1), new(1, 0), new(1, 1), new(0, 1), new(-1, 1), new(-1, 0) };
 
+    /// <summary>Empty margin (DIP) around the image where drawing can start / shapes can stick out.</summary>
+    public const double PadDip = 28;
+    double M => PadDip * S;                         // margin in device pixels
+
     public BitmapSource Image { get; private set; }
     public double S { get; }                       // device pixels per DIP
     public List<Ann> Items = new();
@@ -81,7 +85,7 @@ sealed class CanvasView : FrameworkElement
         }
     }
 
-    protected override Size MeasureOverride(Size _) => new(Image.PixelWidth / S, Image.PixelHeight / S);
+    protected override Size MeasureOverride(Size _) => new(Image.PixelWidth / S + 2 * PadDip, Image.PixelHeight / S + 2 * PadDip);
 
     // ---------------------------------------------------------------- handle geometry
     double Pad(Ann a) => 6 * S + a.StrokeHalf;
@@ -101,12 +105,15 @@ sealed class CanvasView : FrameworkElement
     // ---------------------------------------------------------------- rendering
     protected override void OnRender(DrawingContext dc)
     {
+        dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ActualWidth, ActualHeight));   // hit-testable margin
         dc.PushTransform(new ScaleTransform(1 / S, 1 / S));
+        dc.PushTransform(new TranslateTransform(M, M));
         dc.DrawImage(Image, new Rect(0, 0, Image.PixelWidth, Image.PixelHeight));
         foreach (var a in Items) if (a != Hidden) a.Draw(dc, Image);
         cur?.Draw(dc, Image);
         if (Selected != null && Selected != Hidden) DrawSelection(dc, Selected);
         if (CropMode) DrawCrop(dc);
+        dc.Pop();
         dc.Pop();
     }
 
@@ -135,6 +142,12 @@ sealed class CanvasView : FrameworkElement
     {
         var accent = new SolidColorBrush(Accent);
         var pen = new Pen(accent, S);
+        if (!a.ShowBox)
+        {
+            foreach (var nd in a.Nodes())
+                dc.DrawEllipse(accent, new Pen(Brushes.White, S), a.ToWorld(nd), 5 * S, 5 * S);
+            return;
+        }
         var hw = WorldHandles(a);
         var outline = new Pen(accent, S) { DashStyle = DashStyles.Dash };
         foreach (var (i, j) in new[] { (0, 2), (2, 4), (4, 6), (6, 0) }) dc.DrawLine(outline, hw[i], hw[j]);
@@ -282,6 +295,7 @@ sealed class CanvasView : FrameworkElement
         if (Selected == null) return;
         PushUndo(Snapshot());
         Selected.Move(v);
+        FitCanvas();
         InvalidateVisual();
     }
 
@@ -301,11 +315,46 @@ sealed class CanvasView : FrameworkElement
             var t = new TextAnn { Color = CurColor, W = CurW, A = pos, B = pos, Text = text, Bg = CurTextBg };
             Items.Add(t);
             Select(t);
+            FitCanvas();
         }
         InvalidateVisual();
     }
 
     public void EndTextEdit() { RotateMode = false; }
+
+    // ---------------------------------------------------------------- canvas growth
+    /// <summary>If any object sticks out of the image, grow the canvas (white fill) so everything fits.</summary>
+    void FitCanvas()
+    {
+        const double Max = 4000;
+        double W = Image.PixelWidth, H = Image.PixelHeight, l = 0, t = 0, r = W, b = H;
+        foreach (var a in Items)
+        {
+            if (!a.ExtendsCanvas) continue;
+            var wb = a.WorldBounds();
+            l = Math.Min(l, wb.Left); t = Math.Min(t, wb.Top); r = Math.Max(r, wb.Right); b = Math.Max(b, wb.Bottom);
+        }
+        l = Math.Max(l, -Max); t = Math.Max(t, -Max); r = Math.Min(r, W + Max); b = Math.Min(b, H + Max);
+        int il = (int)Math.Floor(l), it = (int)Math.Floor(t), ir = (int)Math.Ceiling(r), ib = (int)Math.Ceiling(b);
+        if (il == 0 && it == 0 && ir == Image.PixelWidth && ib == Image.PixelHeight) return;
+
+        int nw = ir - il, nh = ib - it;
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, nw, nh));
+            dc.DrawImage(Image, new Rect(-il, -it, Image.PixelWidth, Image.PixelHeight));
+        }
+        var rtb = new RenderTargetBitmap(nw, nh, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render(dv);
+        rtb.Freeze();
+        Image = rtb;
+        var shift = new Vector(-il, -it);
+        foreach (var a in Items) a.Move(shift);
+        if (pivot is { } pv) pivot = pv + shift;
+        InvalidateMeasure(); InvalidateVisual();
+        ImageChanged?.Invoke();
+    }
 
     // ---------------------------------------------------------------- crop
     public void BeginCrop()
@@ -364,7 +413,7 @@ sealed class CanvasView : FrameworkElement
     }
 
     // ---------------------------------------------------------------- hit testing
-    Point Pos(MouseEventArgs e) { var p = e.GetPosition(this); return new Point(p.X * S, p.Y * S); }
+    Point Pos(MouseEventArgs e) { var p = e.GetPosition(this); return new Point(p.X * S - M, p.Y * S - M); }
 
     Ann? HitItem(Point p)
     {
@@ -378,6 +427,13 @@ sealed class CanvasView : FrameworkElement
     {
         var a = Selected;
         if (a == null) return (Mode.None, -1);
+        if (!a.ShowBox)
+        {
+            var ns = a.Nodes();
+            for (int i = ns.Length - 1; i >= 0; i--)
+                if ((p - a.ToWorld(ns[i])).Length <= 8 * S) return (Mode.Endpoint, i);
+            return (Mode.None, -1);
+        }
         var hw = WorldHandles(a);
         if (RotateMode)
         {
@@ -530,7 +586,9 @@ sealed class CanvasView : FrameworkElement
         {
             RotateMode = !RotateMode;      // click on the selected object toggles scale <-> rotate
         }
+        bool geometryChanged = mode is Mode.Draw or Mode.Move or Mode.Scale or Mode.Rotate or Mode.Endpoint;
         mode = Mode.None;
+        if (geometryChanged) FitCanvas();
         InvalidateVisual();
     }
 

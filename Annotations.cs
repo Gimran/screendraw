@@ -32,6 +32,26 @@ abstract class Ann
 
     public virtual double StrokeHalf => W / 2;
     public virtual bool CanRotate => true;
+    /// <summary>Show the 8-handle bounding box when selected (arrows only use their end nodes).</summary>
+    public virtual bool ShowBox => true;
+    /// <summary>Whether this object may grow the canvas when it sticks out of the image.</summary>
+    public virtual bool ExtendsCanvas => true;
+    protected virtual double ExtraReach => 2;
+
+    /// <summary>Bounds of the drawn object in image coordinates (after rotation, including stroke).</summary>
+    public Rect WorldBounds()
+    {
+        var r = GeomBox();
+        var pts = new[] { r.TopLeft, r.TopRight, r.BottomRight, r.BottomLeft };
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+        foreach (var p in pts)
+        {
+            var w = ToWorld(p);
+            minX = Math.Min(minX, w.X); minY = Math.Min(minY, w.Y); maxX = Math.Max(maxX, w.X); maxY = Math.Max(maxY, w.Y);
+        }
+        double m = StrokeHalf + ExtraReach;
+        return new Rect(minX - m, minY - m, maxX - minX + 2 * m, maxY - minY + 2 * m);
+    }
     protected virtual void DrawLocal(DrawingContext dc, BitmapSource src) => DrawLocal(dc);
 
     public void Draw(DrawingContext dc, BitmapSource src)
@@ -87,6 +107,9 @@ sealed class LineAnn : Ann
 sealed class ArrowAnn : Ann
 {
     public int Style;                 // 0 plain, 1 tapered, 2 dotted (curved)
+    public override bool ShowBox => false;
+    public override bool CanRotate => false;
+    protected override double ExtraReach => W * 2 + 6;
     public double MidU = 0.5, MidV;   // curve mid point in chord-relative coordinates
 
     Point Mid()
@@ -318,6 +341,7 @@ sealed class BlurAnn : Ann
 {
     public override double StrokeHalf => 0;
     public override bool CanRotate => false;
+    public override bool ExtendsCanvas => false;
     protected override void DrawLocal(DrawingContext dc) { }
     protected override void DrawLocal(DrawingContext dc, BitmapSource src)
     {
