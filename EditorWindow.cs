@@ -114,6 +114,10 @@ sealed class EditorWindow : Window
     readonly List<(int v, ToggleButton b)> arrowButtons = new();
     FrameworkElement arrowGroup = null!, textGroup = null!;
     Border cropBar = null!;
+    ScrollViewer scroll = null!;
+    readonly Slider zoomSlider = new() { Minimum = 10, Maximum = 400, Value = 100, Width = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
+    readonly Button zoomLbl = new() { Content = "100%", Width = 52, Focusable = false, ToolTip = "Сбросить масштаб (Ctrl+0)", Margin = new Thickness(8, 4, 2, 4) };
+    bool syncingZoom;
 
     public EditorWindow(BitmapSource image, double dpiScale, Config cfg)
     {
@@ -269,17 +273,34 @@ sealed class EditorWindow : Window
             actions.Children.Add(b);
         }
         var bottom = new Grid { Background = Theme.Brush(Theme.Surface) };
+        bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         status.VerticalAlignment = VerticalAlignment.Center; status.TextTrimming = TextTrimming.CharacterEllipsis;
-        Grid.SetColumn(actions, 1);
-        bottom.Children.Add(status); bottom.Children.Add(actions);
+
+        var zoomMinus = new Button { Content = "−", Width = 26, Focusable = false, ToolTip = "Уменьшить (Ctrl+колесо)", Style = iconButton, Padding = new Thickness(0, 2, 0, 2) };
+        var zoomPlus = new Button { Content = "+", Width = 26, Focusable = false, ToolTip = "Увеличить (Ctrl+колесо)", Style = iconButton, Padding = new Thickness(0, 2, 0, 2) };
+        zoomMinus.Foreground = zoomPlus.Foreground = Theme.Brush(Theme.Text);
+        zoomMinus.Click += (_, _) => ApplyZoom(view.Zoom - 0.1);
+        zoomPlus.Click += (_, _) => ApplyZoom(view.Zoom + 0.1);
+        zoomLbl.Click += (_, _) => ApplyZoom(1);
+        zoomSlider.ValueChanged += (_, ev) => { if (!syncingZoom) ApplyZoom(ev.NewValue / 100); };
+        view.ZoomChanged += () =>
+        {
+            syncingZoom = true;
+            zoomSlider.Value = view.Zoom * 100;
+            zoomLbl.Content = $"{Math.Round(view.Zoom * 100)}%";
+            syncingZoom = false;
+        };
+        var zoomGroup = new StackPanel { Orientation = Orientation.Horizontal, Children = { zoomLbl, zoomMinus, zoomSlider, zoomPlus } };
+        Grid.SetColumn(status, 1); Grid.SetColumn(actions, 2);
+        bottom.Children.Add(zoomGroup); bottom.Children.Add(status); bottom.Children.Add(actions);
         var bottomBox = new Border { BorderBrush = line, BorderThickness = new Thickness(0, 1, 0, 0), Child = bottom };
 
         var stage = new Grid();
         stage.Children.Add(view);
         stage.Children.Add(overlay);
-        var scroll = new ScrollViewer
+        scroll = new ScrollViewer
         {
             Content = stage, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Background = Theme.Brush(Theme.Stage),
@@ -314,6 +335,31 @@ sealed class EditorWindow : Window
         RefreshUndo();
     }
 
+    /// <summary>Set the zoom keeping the image point under <paramref name="anchorDip"/> (view coordinates) fixed; default = viewport centre.</summary>
+    void ApplyZoom(double z, Point? anchorDip = null)
+    {
+        z = Math.Clamp(z, 0.1, 8);
+        if (Math.Abs(z - view.Zoom) < 1e-6) return;
+        var a = anchorDip ?? scroll.TranslatePoint(new Point(scroll.ViewportWidth / 2, scroll.ViewportHeight / 2), view);
+        var img = view.ViewToImage(a);
+        view.SetZoom(z);
+        view.UpdateLayout();
+        var na = view.ImageToView(img);
+        scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset + (na.X - a.X));
+        scroll.ScrollToVerticalOffset(scroll.VerticalOffset + (na.Y - a.Y));
+    }
+
+    protected override void OnPreviewMouseWheel(MouseWheelEventArgs e)
+    {
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            e.Handled = true;
+            ApplyZoom(view.Zoom * (e.Delta > 0 ? 1.1 : 1 / 1.1), Mouse.GetPosition(view));
+            return;
+        }
+        base.OnPreviewMouseWheel(e);
+    }
+
     void SetToolButtons(Tool t) { foreach (var (k, b) in toolButtons) b.IsChecked = k == t; }
 
     void UpdateContext()
@@ -325,6 +371,7 @@ sealed class EditorWindow : Window
     void RefreshArrow(int v) { foreach (var (av, ab) in arrowButtons) ab.IsChecked = av == v; }
 
     public void SaveTest(string path) => WriteFile(path);
+    public void TestZoom(double z) => ApplyZoom(z);
 
     public void AddSamples()
     {
@@ -398,12 +445,12 @@ sealed class EditorWindow : Window
         var color = existing?.Color ?? view.CurColor;
         tb = new TextBox
         {
-            Text = existing?.Text ?? "", AcceptsReturn = true, FontFamily = new FontFamily("Segoe UI"), FontSize = px / s,
+            Text = existing?.Text ?? "", AcceptsReturn = true, FontFamily = new FontFamily("Segoe UI"), FontSize = px * view.Zoom / s,
             Foreground = new SolidColorBrush(color), Background = new SolidColorBrush(((existing?.Bg ?? view.CurTextBg) == 1) ? Color.FromArgb(235, 250, 250, 250) : Color.FromArgb(150, 20, 20, 20)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x5B, 0x8D, 0xEF)), BorderThickness = new Thickness(1), Padding = new Thickness(0), MinWidth = 80,
             CaretBrush = Brushes.White,
         };
-        var od = view.OriginDip; Canvas.SetLeft(tb, imgPos.X / s + od.X - 1); Canvas.SetTop(tb, imgPos.Y / s + od.Y - 1);
+        var od = view.OriginDip; Canvas.SetLeft(tb, imgPos.X * view.Zoom / s + od.X - 1); Canvas.SetTop(tb, imgPos.Y * view.Zoom / s + od.Y - 1);
         view.Hidden = existing;
         overlay.Children.Add(tb);
         view.InvalidateVisual();
@@ -445,6 +492,9 @@ sealed class EditorWindow : Window
             case Key.C when ctrl: Copy(); break;
             case Key.S when ctrl && shift: SaveAs(); break;
             case Key.S when ctrl: Save(); break;
+            case Key.D0 or Key.NumPad0 when ctrl: ApplyZoom(1); break;
+            case Key.OemPlus or Key.Add when ctrl: ApplyZoom(view.Zoom + 0.1); break;
+            case Key.OemMinus or Key.Subtract when ctrl: ApplyZoom(view.Zoom - 0.1); break;
             case Key.Delete: case Key.Back: view.DeleteSelected(); break;
             case Key.V when !ctrl: SetTool(Tool.Select); break;
             case Key.A when !ctrl: SetTool(Tool.Arrow); break;
@@ -456,10 +506,10 @@ sealed class EditorWindow : Window
             case Key.M when !ctrl: SetTool(Tool.Marker); break;
             case Key.B when !ctrl: SetTool(Tool.Blur); break;
             case Key.C when !ctrl: SetTool(Tool.Crop); break;
-            case Key.Left: view.Nudge(new Vector(-view.S, 0)); break;
-            case Key.Right: view.Nudge(new Vector(view.S, 0)); break;
-            case Key.Up: view.Nudge(new Vector(0, -view.S)); break;
-            case Key.Down: view.Nudge(new Vector(0, view.S)); break;
+            case Key.Left: view.Nudge(new Vector(-view.U, 0)); break;
+            case Key.Right: view.Nudge(new Vector(view.U, 0)); break;
+            case Key.Up: view.Nudge(new Vector(0, -view.U)); break;
+            case Key.Down: view.Nudge(new Vector(0, view.U)); break;
             default: e.Handled = false; break;
         }
     }

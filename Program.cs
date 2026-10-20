@@ -153,6 +153,7 @@ sealed class Controller : IDisposable
         var ed = new EditorWindow(Grab(new Drawing.Rectangle(x, y, w, h)), 1, cfg);
         ed.Show();
         ed.AddSamples();
+        if (double.TryParse(Environment.GetEnvironmentVariable("SCREENDRAW_TEST_ZOOM"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tz)) ed.TestZoom(tz);
         var outPath = Environment.GetEnvironmentVariable("SCREENDRAW_TEST_OUT");
         if (!string.IsNullOrEmpty(outPath)) ed.SaveTest(outPath);
     }

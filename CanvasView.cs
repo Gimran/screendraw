@@ -31,11 +31,30 @@ sealed class CanvasView : FrameworkElement
     double M => PadDip * S;                         // margin in device pixels
 
     /// <summary>Top-left of the image in view device pixels: centred, never closer than the margin to the edge.</summary>
-    Point Origin => new(Math.Floor(Math.Max(M, (ActualWidth * S - Image.PixelWidth) / 2)), Math.Floor(Math.Max(M, (ActualHeight * S - Image.PixelHeight) / 2)));
+    Point Origin => new(Math.Floor(Math.Max(M, (ActualWidth * S - Image.PixelWidth * Zoom) / 2)), Math.Floor(Math.Max(M, (ActualHeight * S - Image.PixelHeight * Zoom) / 2)));
     public Vector OriginDip { get { var o = Origin; return new Vector(o.X / S, o.Y / S); } }
 
     public BitmapSource Image { get; private set; }
     public double S { get; }                       // device pixels per DIP
+    public double Zoom { get; private set; } = 1;  // device pixels per image pixel
+    /// <summary>Image pixels per DIP at the current zoom: keeps handles / tolerances a constant size on screen.</summary>
+    public double U => S / Zoom;
+    public event Action? ZoomChanged;
+
+    public void SetZoom(double z)
+    {
+        z = Math.Clamp(z, 0.1, 8);
+        if (Math.Abs(z - Zoom) < 1e-6) return;
+        Zoom = z;
+        RenderOptions.SetBitmapScalingMode(this, z >= 2 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
+        InvalidateMeasure(); InvalidateVisual();
+        ZoomChanged?.Invoke();
+    }
+
+    /// <summary>Image point -> position inside this element (DIP).</summary>
+    public Point ImageToView(Point img) { var o = Origin; return new Point((o.X + img.X * Zoom) / S, (o.Y + img.Y * Zoom) / S); }
+    /// <summary>Position inside this element (DIP) -> image point.</summary>
+    public Point ViewToImage(Point dip) { var o = Origin; return new Point((dip.X * S - o.X) / Zoom, (dip.Y * S - o.Y) / Zoom); }
     public List<Ann> Items = new();
     public Ann? Selected { get; private set; }
     public Ann? Hidden;                            // text being edited in a TextBox
@@ -89,10 +108,10 @@ sealed class CanvasView : FrameworkElement
         }
     }
 
-    protected override Size MeasureOverride(Size _) => new(Image.PixelWidth / S + 2 * PadDip, Image.PixelHeight / S + 2 * PadDip);
+    protected override Size MeasureOverride(Size _) => new(Image.PixelWidth * Zoom / S + 2 * PadDip, Image.PixelHeight * Zoom / S + 2 * PadDip);
 
     // ---------------------------------------------------------------- handle geometry
-    double Pad(Ann a) => 6 * S + a.StrokeHalf;
+    double Pad(Ann a) => 6 * U + a.StrokeHalf;
 
     Rect DispBox(Ann a) { var r = a.GeomBox(); double p = Pad(a); return new Rect(r.X - p, r.Y - p, r.Width + 2 * p, r.Height + 2 * p); }
 
@@ -113,11 +132,13 @@ sealed class CanvasView : FrameworkElement
         dc.PushTransform(new ScaleTransform(1 / S, 1 / S));
         var org = Origin;
         dc.PushTransform(new TranslateTransform(org.X, org.Y));
+        dc.PushTransform(new ScaleTransform(Zoom, Zoom));
         dc.DrawImage(Image, new Rect(0, 0, Image.PixelWidth, Image.PixelHeight));
         foreach (var a in Items) if (a != Hidden) a.Draw(dc, Image);
         cur?.Draw(dc, Image);
         if (Selected != null && Selected != Hidden) DrawSelection(dc, Selected);
         if (CropMode) DrawCrop(dc);
+        dc.Pop();
         dc.Pop();
         dc.Pop();
     }
@@ -128,67 +149,67 @@ sealed class CanvasView : FrameworkElement
         dc.DrawGeometry(new SolidColorBrush(Color.FromArgb(150, 0, 0, 0)), null,
             new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(full), new RectangleGeometry(crop)));
         var accent = new SolidColorBrush(Accent);
-        dc.DrawRectangle(null, new Pen(Brushes.White, S), crop);
-        var thirds = new Pen(new SolidColorBrush(Color.FromArgb(90, 255, 255, 255)), S);
+        dc.DrawRectangle(null, new Pen(Brushes.White, U), crop);
+        var thirds = new Pen(new SolidColorBrush(Color.FromArgb(90, 255, 255, 255)), U);
         for (int i = 1; i <= 2; i++)
         {
             dc.DrawLine(thirds, new Point(crop.X + crop.Width * i / 3, crop.Y), new Point(crop.X + crop.Width * i / 3, crop.Bottom));
             dc.DrawLine(thirds, new Point(crop.X, crop.Y + crop.Height * i / 3), new Point(crop.Right, crop.Y + crop.Height * i / 3));
         }
-        double hs = 5 * S;
+        double hs = 5 * U;
         for (int i = 0; i < 8; i++)
         {
             var h = BoxPoint(crop, i);
-            dc.DrawEllipse(accent, new Pen(Brushes.White, S), h, hs, hs);
+            dc.DrawEllipse(accent, new Pen(Brushes.White, U), h, hs, hs);
         }
     }
 
     void DrawSelection(DrawingContext dc, Ann a)
     {
         var accent = new SolidColorBrush(Accent);
-        var pen = new Pen(accent, S);
+        var pen = new Pen(accent, U);
         if (!a.ShowBox)
         {
             foreach (var nd in a.Nodes())
-                dc.DrawEllipse(accent, new Pen(Brushes.White, S), a.ToWorld(nd), 5 * S, 5 * S);
+                dc.DrawEllipse(accent, new Pen(Brushes.White, U), a.ToWorld(nd), 5 * U, 5 * U);
             return;
         }
         var hw = WorldHandles(a);
-        var outline = new Pen(accent, S) { DashStyle = DashStyles.Dash };
+        var outline = new Pen(accent, U) { DashStyle = DashStyles.Dash };
         foreach (var (i, j) in new[] { (0, 2), (2, 4), (4, 6), (6, 0) }) dc.DrawLine(outline, hw[i], hw[j]);
 
         if (!RotateMode)
         {
-            double hs = 4 * S;
+            double hs = 4 * U;
             var c = a.Center;
-            var cross = new Pen(accent, S);
-            dc.DrawLine(cross, new Point(c.X - 4 * S, c.Y - 4 * S), new Point(c.X + 4 * S, c.Y + 4 * S));
-            dc.DrawLine(cross, new Point(c.X - 4 * S, c.Y + 4 * S), new Point(c.X + 4 * S, c.Y - 4 * S));
+            var cross = new Pen(accent, U);
+            dc.DrawLine(cross, new Point(c.X - 4 * U, c.Y - 4 * U), new Point(c.X + 4 * U, c.Y + 4 * U));
+            dc.DrawLine(cross, new Point(c.X - 4 * U, c.Y + 4 * U), new Point(c.X + 4 * U, c.Y - 4 * U));
             foreach (var h in hw)
                 dc.DrawRectangle(Brushes.White, pen, new Rect(h.X - hs, h.Y - hs, hs * 2, hs * 2));
             foreach (var nd in a.Nodes())
-                dc.DrawEllipse(accent, new Pen(Brushes.White, S), a.ToWorld(nd), 5 * S, 5 * S);
+                dc.DrawEllipse(accent, new Pen(Brushes.White, U), a.ToWorld(nd), 5 * U, 5 * U);
         }
         else
         {
             foreach (int i in new[] { 0, 2, 4, 6 })
             {
                 var h = hw[i];
-                dc.DrawEllipse(Brushes.White, pen, h, 7 * S, 7 * S);
+                dc.DrawEllipse(Brushes.White, pen, h, 7 * U, 7 * U);
                 var arc = new StreamGeometry();
                 using (var g = arc.Open())
                 {
-                    g.BeginFigure(new Point(h.X + 3.5 * S, h.Y - 1.5 * S), false, false);
-                    g.ArcTo(new Point(h.X - 1.5 * S, h.Y + 3.5 * S), new Size(3.8 * S, 3.8 * S), 0, true, SweepDirection.Clockwise, true, false);
+                    g.BeginFigure(new Point(h.X + 3.5 * U, h.Y - 1.5 * U), false, false);
+                    g.ArcTo(new Point(h.X - 1.5 * U, h.Y + 3.5 * U), new Size(3.8 * U, 3.8 * U), 0, true, SweepDirection.Clockwise, true, false);
                 }
                 arc.Freeze();
-                dc.DrawGeometry(null, new Pen(accent, 1.6 * S) { EndLineCap = PenLineCap.Round, StartLineCap = PenLineCap.Round }, arc);
+                dc.DrawGeometry(null, new Pen(accent, 1.6 * U) { EndLineCap = PenLineCap.Round, StartLineCap = PenLineCap.Round }, arc);
             }
             var p = PivotPoint;
-            dc.DrawEllipse(Brushes.White, pen, p, 7 * S, 7 * S);
-            dc.DrawLine(pen, new Point(p.X - 10 * S, p.Y), new Point(p.X + 10 * S, p.Y));
-            dc.DrawLine(pen, new Point(p.X, p.Y - 10 * S), new Point(p.X, p.Y + 10 * S));
-            dc.DrawEllipse(accent, null, p, 2.2 * S, 2.2 * S);
+            dc.DrawEllipse(Brushes.White, pen, p, 7 * U, 7 * U);
+            dc.DrawLine(pen, new Point(p.X - 10 * U, p.Y), new Point(p.X + 10 * U, p.Y));
+            dc.DrawLine(pen, new Point(p.X, p.Y - 10 * U), new Point(p.X, p.Y + 10 * U));
+            dc.DrawEllipse(accent, null, p, 2.2 * U, 2.2 * U);
         }
     }
 
@@ -394,7 +415,7 @@ sealed class CanvasView : FrameworkElement
     int HitCropHandle(Point p)
     {
         for (int i = 0; i < 8; i++)
-            if ((p - BoxPoint(crop, i)).Length <= 9 * S) return i;
+            if ((p - BoxPoint(crop, i)).Length <= 9 * U) return i;
         return -1;
     }
 
@@ -418,12 +439,12 @@ sealed class CanvasView : FrameworkElement
     }
 
     // ---------------------------------------------------------------- hit testing
-    Point Pos(MouseEventArgs e) { var p = e.GetPosition(this); var o = Origin; return new Point(p.X * S - o.X, p.Y * S - o.Y); }
+    Point Pos(MouseEventArgs e) { var p = e.GetPosition(this); var o = Origin; return new Point((p.X * S - o.X) / Zoom, (p.Y * S - o.Y) / Zoom); }
 
     Ann? HitItem(Point p)
     {
         for (int i = Items.Count - 1; i >= 0; i--)
-            if (Items[i].Hit(p, 6 * S)) return Items[i];
+            if (Items[i].Hit(p, 6 * U)) return Items[i];
         return null;
     }
 
@@ -436,22 +457,22 @@ sealed class CanvasView : FrameworkElement
         {
             var ns = a.Nodes();
             for (int i = ns.Length - 1; i >= 0; i--)
-                if ((p - a.ToWorld(ns[i])).Length <= 8 * S) return (Mode.Endpoint, i);
+                if ((p - a.ToWorld(ns[i])).Length <= 8 * U) return (Mode.Endpoint, i);
             return (Mode.None, -1);
         }
         var hw = WorldHandles(a);
         if (RotateMode)
         {
-            if ((p - PivotPoint).Length <= 9 * S) return (Mode.Pivot, 0);
+            if ((p - PivotPoint).Length <= 9 * U) return (Mode.Pivot, 0);
             foreach (int i in new[] { 0, 2, 4, 6 })
-                if ((p - hw[i]).Length <= 10 * S) return (Mode.Rotate, i);
+                if ((p - hw[i]).Length <= 10 * U) return (Mode.Rotate, i);
             return (Mode.None, -1);
         }
         var nodes = a.Nodes();
         for (int i = nodes.Length - 1; i >= 0; i--)
-            if ((p - a.ToWorld(nodes[i])).Length <= 8 * S) return (Mode.Endpoint, i);
+            if ((p - a.ToWorld(nodes[i])).Length <= 8 * U) return (Mode.Endpoint, i);
         for (int i = 0; i < 8; i++)
-            if ((p - hw[i]).Length <= 7 * S) return (Mode.Scale, i);
+            if ((p - hw[i]).Length <= 7 * U) return (Mode.Scale, i);
         return (Mode.None, -1);
     }
 
@@ -497,7 +518,7 @@ sealed class CanvasView : FrameworkElement
         }
 
         // a drawing tool: pressing on the selected object itself moves it; anywhere else starts a new shape
-        if (tool != Tool.Select && tool != Tool.Text && Selected != null && Selected.Hit(p, 6 * S))
+        if (tool != Tool.Select && tool != Tool.Text && Selected != null && Selected.Hit(p, 6 * U))
         {
             wasSelected = true;
             BeginEdit(); mode = Mode.Move; last = p; CaptureMouse();
@@ -614,7 +635,7 @@ sealed class CanvasView : FrameworkElement
             Mode.Endpoint => Cursors.Cross,
             Mode.Scale => HandleCursor(i),
             _ when selectLike => HitItem(p) != null ? Cursors.SizeAll : Cursors.Arrow,
-            _ when _tool != Tool.Text && Selected != null && Selected.Hit(p, 6 * S) => Cursors.SizeAll,
+            _ when _tool != Tool.Text && Selected != null && Selected.Hit(p, 6 * U) => Cursors.SizeAll,
             _ => _tool == Tool.Crop ? Cursors.Arrow : Cursors.Cross,
         };
     }
