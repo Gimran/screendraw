@@ -111,7 +111,6 @@ sealed class EditorWindow : Window
         Resources.MergedDictionaries.Add(Theme.Styles);
         Title = "ScreenDraw";
         Background = Theme.Brush(Theme.Bg);
-        Topmost = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SizeToContent = SizeToContent.WidthAndHeight;
         var wa = SystemParameters.WorkArea;
@@ -472,8 +471,12 @@ sealed class EditorWindow : Window
 
     void Copy()
     {
-        try { ToClipboard(Result()); Finish("Скопировано в буфер обмена"); }
-        catch (Exception ex) { status.Text = "Не удалось скопировать: " + ex.Message; }
+        try
+        {
+            Directory.CreateDirectory(cfg.SaveDir);
+            WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()), forceCopy: true);   // always saved to the folder too
+        }
+        catch (Exception ex) { status.Text = "Не удалось сохранить: " + ex.Message; }
     }
 
     void Save()
@@ -500,13 +503,13 @@ sealed class EditorWindow : Window
         }
     }
 
-    void WriteFile(string path)
+    void WriteFile(string path, bool forceCopy = false)
     {
         var bmp = Result();
         BitmapEncoder enc = path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ? new JpegBitmapEncoder { QualityLevel = 95 } : new PngBitmapEncoder();
         enc.Frames.Add(BitmapFrame.Create(bmp));
         using (var fs = File.Create(path)) enc.Save(fs);
-        if (cfg.CopyOnSave) { try { ToClipboard(bmp); } catch { } }
-        Finish("Сохранено: " + path);
+        if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp); } catch { } }
+        Finish((forceCopy ? "Скопировано и сохранено: " : "Сохранено: ") + path);
     }
 }

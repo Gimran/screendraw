@@ -18,7 +18,6 @@ sealed class SettingsWindow : Window
         SizeToContent = SizeToContent.WidthAndHeight;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Topmost = true;
 
         dir.Text = cfg.SaveDir;
         hotkey.Text = cfg.Hotkey;

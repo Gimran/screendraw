@@ -16,7 +16,8 @@ sealed class Config
     public int TextBg { get; set; } = 0;
     public int ArrowStyle { get; set; } = 0;
     public bool CopyOnSave { get; set; } = true;
-    public bool CloseAfter { get; set; } = false;
+    public bool CloseAfter { get; set; } = true;
+    public int Version { get; set; } = 2;
     public bool Autostart { get; set; } = false;
 
     static readonly string PathFile = System.IO.Path.Combine(
@@ -27,6 +28,7 @@ sealed class Config
         try
         {
             var cfg = JsonSerializer.Deserialize<Config>(File.ReadAllText(PathFile)) ?? new Config();
+            if (cfg.Version < 2) { cfg.CloseAfter = true; cfg.Version = 2; }   // new default
             if (cfg.Hotkey == "Ctrl+Shift+A") cfg.Hotkey = "Ctrl+Shift+`";   // old default
             return cfg;
         }
