@@ -10,6 +10,7 @@ sealed class SettingsWindow : Window
     readonly TextBox hotkey = new() { IsReadOnly = true, IsReadOnlyCaretVisible = false };
     readonly CheckBox copy = new() { Content = Loc.T("Копировать в буфер при сохранении") };
     readonly CheckBox close = new() { Content = Loc.T("Закрывать редактор после сохранения/копирования") };
+    bool accepted;
     readonly ComboBox lang = new() { MinWidth = 160, HorizontalAlignment = HorizontalAlignment.Left };
     readonly CheckBox auto = new() { Content = Loc.T("Запускать вместе с Windows") };
 
@@ -47,7 +48,7 @@ sealed class SettingsWindow : Window
             if (d.ShowDialog(this) == true) dir.Text = d.FolderName;
         };
         var ok = new Button { Content = "OK", IsDefault = true, Width = 80, Margin = new Thickness(0, 12, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
-        ok.Click += (_, _) => { DialogResult = true; };
+        ok.Click += (_, _) => { if (!accepted) { accepted = true; DialogResult = true; } };   // a double click must not set the result twice
 
         var row = new DockPanel { Margin = new Thickness(0, 2, 0, 10) };
         DockPanel.SetDock(browse, Dock.Right);

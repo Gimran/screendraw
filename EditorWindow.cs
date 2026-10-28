@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -346,6 +346,7 @@ sealed class EditorWindow : Window
             (Loc.T("Сохранить"), "Ctrl+S", Save), (Loc.T("Сохранить как…"), "Ctrl+Shift+S", SaveAs) })
         {
             var b = new Button { Content = text, ToolTip = tip, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(6, 6, 0, 6), Focusable = false };
+            if (copyBtn == null) copyBtn = b;
             b.Click += (_, _) => act();
             actions.Children.Add(b);
         }
@@ -612,9 +613,17 @@ sealed class EditorWindow : Window
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, FreezeSize);
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    Button? copyBtn;
+
     void OnFirstRender(object? s, EventArgs e)
     {
         ContentRendered -= OnFirstRender;
+        if (!Config.NoSave && copyBtn is { IsLoaded: true })   // park the mouse pointer on "Copy" so the common action is one click away
+        {
+            var p = copyBtn.PointToScreen(new Point(copyBtn.ActualWidth / 2, copyBtn.ActualHeight / 2));
+            SetCursorPos((int)p.X, (int)p.Y);
+        }
         FreezeSize();   // the initial size fits the capture; after that only an explicit re-fit may change it
     }
 

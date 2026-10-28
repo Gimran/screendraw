@@ -25,15 +25,47 @@ static class Program
             try { first = mutex.WaitOne(8000); } catch (AbandonedMutexException) { first = true; }
         }
         if (!first) return;
+        CrashLog.Install();
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, ThemeMode = ThemeMode.Dark };
-        var ctl = new Controller(app);
+        Controller ctl;
+        try { ctl = new Controller(app); }
+        catch (Exception ex)
+        {
+            // e.g. the shell is not ready yet right after logon: log it and try once more a few seconds later
+            CrashLog.Write("Startup failed", ex, true);
+            if (!args.Contains("--retried"))
+            {
+                Thread.Sleep(4000);
+                try { System.Diagnostics.Process.Start(Environment.ProcessPath!, "--restarted --retried"); } catch { }
+            }
+            return;
+        }
+        // an error in some event handler must not kill the tray app: log it and carry on
+        app.DispatcherUnhandledException += (_, e) =>
+        {
+            CrashLog.Write("UI thread exception", e.Exception);
+            e.Handled = true;
+            ctl.ReportError(e.Exception.Message);
+        };
+        app.SessionEnding += (_, e) => CrashLog.Write("Session ending: " + e.ReasonSessionEnding, null);
         if (args.Contains("--now")) app.Dispatcher.BeginInvoke(ctl.Capture);
+        if (args.Contains("--test-crash")) app.Dispatcher.BeginInvoke(new Action(() => throw new InvalidOperationException("test exception (--test-crash)")));
         int ii = Array.IndexOf(args, "--test-image");   // debug: open an image file, enable background removal, optionally save to SCREENDRAW_TEST_OUT
         if (ii >= 0) app.Dispatcher.BeginInvoke(() => ctl.TestImage(args[ii + 1]));
         int ti = Array.IndexOf(args, "--test-rect");   // debug: skip selection, grab x,y,w,h and add sample marks
         if (ti >= 0) { var n = args[ti + 1].Split(',').Select(int.Parse).ToArray(); app.Dispatcher.BeginInvoke(() => ctl.TestRect(n[0], n[1], n[2], n[3])); }
-        app.Run();
-        ctl.Dispose();
+        int qi = Array.IndexOf(args, "--quit-after");   // debug: shut down cleanly after N seconds (reproduces the exit path)
+        if (qi >= 0)
+        {
+            var qt = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(double.Parse(args[qi + 1], System.Globalization.CultureInfo.InvariantCulture)) };
+            qt.Tick += (_, _) => app.Shutdown();
+            qt.Start();
+        }
+        try { app.Run(); }
+        finally
+        {
+            try { ctl.Dispose(); } catch (Exception ex) { CrashLog.Write("Dispose failed", ex); }
+        }
     }
 }
 
@@ -203,6 +235,8 @@ sealed class Controller : IDisposable
         ed.Show();
         ed.Activate();
     }
+
+    public void ReportError(string message) => tray.ShowBalloonTip(5000, "ScreenDraw", Loc.T("Ошибка: ") + message, Forms.ToolTipIcon.Error);
 
     public void Dispose()
     {
