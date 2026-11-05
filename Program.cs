@@ -103,7 +103,7 @@ sealed class Controller : IDisposable
 
     static Drawing.Icon MakeIcon()
     {
-        var res = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/app.ico"));
+        var res = Application.GetResourceStream(new Uri("pack://application:,,,/app_new.ico"));
         return new Drawing.Icon(res.Stream);
     }
 

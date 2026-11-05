@@ -63,7 +63,7 @@ static class Theme
     }
 
     static BitmapFrame? appIcon;
-    public static BitmapFrame AppIcon => appIcon ??= BitmapFrame.Create(new Uri("pack://application:,,,/Assets/app.png"));
+    public static BitmapFrame AppIcon => appIcon ??= BitmapFrame.Create(new Uri("pack://application:,,,/app_new.ico"));
 
     public static FrameworkElement BgIcon(int v)
     {
