@@ -28,6 +28,10 @@ static class Loc
 
     static readonly Dictionary<string, string> En = new()
     {
+        ["Укажите полный путь к папке сохранения."] = "Specify an absolute path to the save folder.",
+        ["Диск или сетевая папка недоступны: "] = "Drive or network share is unavailable: ",
+        ["Не удалось сохранить скриншот в папку:"] = "Could not save the screenshot to this folder:",
+        ["Выбрать другую папку? При отмене скриншот останется в редакторе."] = "Choose another folder? If you cancel, the screenshot will remain in the editor.",
         // settings window
         ["Копировать в буфер при сохранении"] = "Copy to clipboard when saving",
         ["Закрывать редактор после сохранения/копирования"] = "Close the editor after saving/copying",

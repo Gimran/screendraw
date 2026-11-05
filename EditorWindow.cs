@@ -744,7 +744,7 @@ sealed class EditorWindow : Window
         if (cfg.CloseAfter) Close();
     }
 
-    static string NewName() => DateTime.Now.ToString("'screenshot_'yyyy-MM-dd_HH-mm-ss'.png'");
+    static string NewName() => DateTime.Now.ToString("'screenshot_'yyyy-MM-dd_HH-mm-ss-fffffff'.png'");
 
     BitmapSource Result(bool keyed = true) { CommitText(); return view.Render(keyed); }
 
@@ -763,23 +763,37 @@ sealed class EditorWindow : Window
         Clipboard.SetDataObject(data, true);
     }
 
+    string? ChooseSaveFolder(string? failed, Exception error)
+    {
+        status.Text = Loc.T("Не удалось сохранить: ") + error.Message;
+        var message = Loc.T("Не удалось сохранить скриншот в папку:") + "\n" + failed + "\n\n" + error.Message
+            + "\n\n" + Loc.T("Выбрать другую папку? При отмене скриншот останется в редакторе.");
+        if (MessageBox.Show(this, message, "ScreenDraw", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return null;
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Loc.T("Папка сохранения") };
+        return dialog.ShowDialog(this) == true ? dialog.FolderName : null;
+    }
+
+    bool SaveToFolder(bool forceCopy = false, bool forPath = false)
+    {
+        string? folder = SaveLocation.Save(cfg.SaveDir,
+            dir => WriteFile(System.IO.Path.Combine(dir, NewName()), forceCopy, forPath, finish: false),
+            ChooseSaveFolder);
+        if (folder == null) return false;
+        if (cfg.SaveDir != folder) { cfg.SaveDir = folder; cfg.Save(); }
+        if (!forPath) Finish((forceCopy ? Loc.T("Скопировано и сохранено: ") : Loc.T("Сохранено: ")) + lastPath);
+        return true;
+    }
+
     void Copy()
     {
-        try
-        {
-            Directory.CreateDirectory(cfg.SaveDir);
-            WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()), forceCopy: true);   // always saved to the folder too
-        }
+        try { SaveToFolder(forceCopy: true); }
         catch (Exception ex) { status.Text = Loc.T("Не удалось сохранить: ") + ex.Message; }
     }
 
     void Save()
     {
-        try
-        {
-            Directory.CreateDirectory(cfg.SaveDir);
-            WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()));
-        }
+        try { SaveToFolder(); }
         catch (Exception ex) { status.Text = Loc.T("Не удалось сохранить: ") + ex.Message; }
     }
 
@@ -798,7 +812,7 @@ sealed class EditorWindow : Window
     }
 
     /// <summary>Saves the result to <paramref name="path"/>. <paramref name="forPath"/>: only the file is wanted (the path goes to the clipboard afterwards).</summary>
-    void WriteFile(string path, bool forceCopy = false, bool forPath = false)
+    void WriteFile(string path, bool forceCopy = false, bool forPath = false, bool finish = true)
     {
         bool jpg = path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase);
         var bmp = Result(keyed: !jpg);
@@ -807,8 +821,8 @@ sealed class EditorWindow : Window
         using (var fs = File.Create(path)) enc.Save(fs);
         lastPath = path; dirty = false;
         if (forPath) return;
-        if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp, alpha: !jpg && view.KeyedImage != null); } catch (Exception ex) { status.Text = Loc.T("Буфер обмена: ") + ex.Message; } }
-        Finish((forceCopy ? Loc.T("Скопировано и сохранено: ") : Loc.T("Сохранено: ")) + path);
+        if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp, alpha: !jpg && view.KeyedImage != null); } catch (Exception ex) { throw new InvalidOperationException(Loc.T("Буфер обмена: ") + ex.Message, ex); } }
+        if (finish) Finish((forceCopy ? Loc.T("Скопировано и сохранено: ") : Loc.T("Сохранено: ")) + path);
     }
 
     /// <summary>Copies the file path as text; the image is saved first if it has not been saved yet or was edited since.</summary>
@@ -818,8 +832,7 @@ sealed class EditorWindow : Window
         {
             if (lastPath == null || dirty || !File.Exists(lastPath))
             {
-                Directory.CreateDirectory(cfg.SaveDir);
-                WriteFile(System.IO.Path.Combine(cfg.SaveDir, NewName()), forPath: true);
+                if (!SaveToFolder(forPath: true)) return;
             }
             Clipboard.SetText(lastPath!);
             Finish(Loc.T("Путь скопирован: ") + lastPath);

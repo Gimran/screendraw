@@ -13,6 +13,7 @@
     <NoWarn>WFO0003;WPF0001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
     <Resource Include="Assets/*.png" />
     <Resource Include="app_new.ico" />
   </ItemGroup>
