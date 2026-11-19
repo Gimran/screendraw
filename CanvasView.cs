@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -55,7 +55,7 @@ sealed class CanvasView : FrameworkElement
 
     public void SetZoom(double z)
     {
-        z = Math.Clamp(z, 0.1, 8);
+        z = Math.Clamp(z, 0.001, 8);
         if (Math.Abs(z - Zoom) < 1e-6) return;
         Zoom = z;
         RenderOptions.SetBitmapScalingMode(this, z >= 2 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);

@@ -133,7 +133,7 @@ sealed class EditorWindow : Window
     FrameworkElement arrowGroup = null!, textGroup = null!;
     Border cropBar = null!;
     ScrollViewer scroll = null!;
-    readonly Slider zoomSlider = new() { Minimum = 10, Maximum = 400, Value = 100, Width = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
+    readonly Slider zoomSlider = new() { Minimum = 0.1, Maximum = 800, Value = 100, Width = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
     readonly Button zoomLbl = new() { Content = "100%", Width = 60, Padding = new Thickness(2, 2, 2, 2), Focusable = false, ToolTip = Loc.T("Сбросить масштаб (Ctrl+0)"), Margin = new Thickness(8, 4, 2, 4) };
     ToggleButton bgToggle = null!, pipette = null!;
     WrapPanel bgRow = null!;
@@ -145,9 +145,12 @@ sealed class EditorWindow : Window
     Point panStart;
     double panH, panV;
 
-    public EditorWindow(BitmapSource image, double dpiScale, Config cfg)
+    readonly bool openedFile;
+
+    public EditorWindow(BitmapSource image, double dpiScale, Config cfg, bool openedFile = false)
     {
         this.cfg = cfg;
+        this.openedFile = openedFile;
         Resources.MergedDictionaries.Add(Theme.Styles);
         Title = "ScreenDraw";
         Icon = Theme.AppIcon;
@@ -155,7 +158,12 @@ sealed class EditorWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SizeToContent = SizeToContent.WidthAndHeight;
         var wa = SystemParameters.WorkArea;
-        MaxWidth = wa.Width; MaxHeight = wa.Height;
+        if (openedFile)
+        {
+            SizeToContent = SizeToContent.Manual;
+            WindowState = WindowState.Maximized;
+        }
+        else { MaxWidth = wa.Width; MaxHeight = wa.Height; }
 
         view = new CanvasView(image, dpiScale)
         {
@@ -440,7 +448,7 @@ sealed class EditorWindow : Window
     /// <summary>Set the zoom keeping the image point under <paramref name="anchorDip"/> (view coordinates) fixed; default = viewport centre.</summary>
     void ApplyZoom(double z, Point? anchorDip = null)
     {
-        z = Math.Clamp(z, 0.1, 8);
+        z = Math.Clamp(z, 0.001, 8);
         if (Math.Abs(z - view.Zoom) < 1e-6) return;
         var a = anchorDip ?? scroll.TranslatePoint(new Point(scroll.ViewportWidth / 2, scroll.ViewportHeight / 2), view);
         var img = view.ViewToImage(a);
@@ -607,6 +615,7 @@ sealed class EditorWindow : Window
 
     void FitWindow()
     {
+        if (openedFile || WindowState == WindowState.Maximized) return;
         // re-fit the window to the new image size once, then freeze it again (zoom must not resize the window)
         SizeToContent = SizeToContent.Manual;
         Width = double.NaN; Height = double.NaN;
@@ -620,12 +629,34 @@ sealed class EditorWindow : Window
     void OnFirstRender(object? s, EventArgs e)
     {
         ContentRendered -= OnFirstRender;
+        if (openedFile)
+        {
+            FitImageToViewport();
+            return;
+        }
         if (!Config.NoSave && copyBtn is { IsLoaded: true })   // park the mouse pointer on "Copy" so the common action is one click away
         {
             var p = copyBtn.PointToScreen(new Point(copyBtn.ActualWidth / 2, copyBtn.ActualHeight / 2));
             SetCursorPos((int)p.X, (int)p.Y);
         }
         FreezeSize();   // the initial size fits the capture; after that only an explicit re-fit may change it
+    }
+
+    void FitImageToViewport()
+    {
+        CommitText();
+        view.AddPan(-view.Pan);
+        // Repeat after layout: shrinking a large image can remove the scroll bars.
+        for (int i = 0; i < 2; i++)
+        {
+            scroll.UpdateLayout();
+            double w = scroll.ViewportWidth - 2 * CanvasView.PadDip - 2;
+            double h = scroll.ViewportHeight - 2 * CanvasView.PadDip - 2;
+            if (w <= 0 || h <= 0) return;
+            view.SetZoom(Math.Min(w * view.S / view.Image.PixelWidth, h * view.S / view.Image.PixelHeight));
+        }
+        scroll.ScrollToHorizontalOffset(0);
+        scroll.ScrollToVerticalOffset(0);
     }
 
     void FreezeSize()

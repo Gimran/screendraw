@@ -24,7 +24,7 @@ static class ImageDocuments
             try
             {
                 var image = ImageInput.Load(path);
-                var editor = new EditorWindow(image, 1, cfg) { Title = "ScreenDraw — " + Path.GetFileName(path) };
+                var editor = new EditorWindow(image, 1, cfg, openedFile: true) { Title = "ScreenDraw — " + Path.GetFileName(path) };
                 editor.Show();
                 editor.Activate();
             }
