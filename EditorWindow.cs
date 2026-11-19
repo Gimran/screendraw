@@ -857,6 +857,13 @@ sealed class EditorWindow : Window
         BitmapEncoder enc = jpg ? new JpegBitmapEncoder { QualityLevel = 95 } : new PngBitmapEncoder();
         enc.Frames.Add(BitmapFrame.Create(bmp));
         using (var fs = File.Create(path)) enc.Save(fs);
+        // Remember only a successfully written file's folder, before clipboard/close.
+        string savedDir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!;
+        if (!string.Equals(cfg.SaveDir, savedDir, StringComparison.OrdinalIgnoreCase))
+        {
+            cfg.SaveDir = savedDir;
+            cfg.Save();
+        }
         lastPath = path; dirty = false;
         if (forPath) return;
         if (forceCopy || cfg.CopyOnSave) { try { ToClipboard(bmp, alpha: !jpg && view.KeyedImage != null); } catch (Exception ex) { throw new InvalidOperationException(Loc.T("Буфер обмена: ") + ex.Message, ex); } }
