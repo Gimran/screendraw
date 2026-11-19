@@ -59,6 +59,15 @@ Tip: enable *Start with Windows* in Settings to have it always ready.
 
 Turn on the checkerboard button in the toolbar. A third row appears: pick the colour to remove (click the swatch, use the eyedropper, or press *White*) and set the tolerance. The default 5 % is lossless for clean white backgrounds; raise it for noisy photos or JPEG-ish scans. Only PNG output and the clipboard are made transparent (JPEG cannot be).
 
+## Open images for editing
+
+- Choose **Open file…** from the tray menu or editor bottom bar, or press `Ctrl+O`.
+- Select multiple files to open separate editor windows without replacing the current document.
+- In Explorer, use **Open with → ScreenDraw**. Normal startup registers the app for the current user without changing default file associations. If it is not listed yet, browse to `dist\ScreenDraw.exe`.
+- Command line: `ScreenDraw.exe "C:\Pictures\my image.png"`. Files are forwarded to the existing tray instance when it is already running.
+- PNG, JPEG, BMP, GIF, TIFF and ICO are listed in the dialog. GIF/TIFF open the first frame/page only; animation is not edited. Other formats under **All files** depend on installed Windows decoders.
+- Opening releases the source file immediately and does not modify it. **Save** creates a copy in your configured folder; use **Save as…** to explicitly overwrite the original.
+
 ## Settings
 
 Open them from the tray icon's menu: save folder, hotkey (click the field and press the combination), language, start with Windows, copy-on-save and close-after options. Configuration is stored in `%APPDATA%\ScreenDraw\config.json`.

@@ -32,6 +32,11 @@ static class Loc
         ["Диск или сетевая папка недоступны: "] = "Drive or network share is unavailable: ",
         ["Не удалось сохранить скриншот в папку:"] = "Could not save the screenshot to this folder:",
         ["Выбрать другую папку? При отмене скриншот останется в редакторе."] = "Choose another folder? If you cancel, the screenshot will remain in the editor.",
+        ["Открыть файл…"] = "Open file…",
+        ["Изображения"] = "Images",
+        ["Все файлы"] = "All files",
+        ["Не удалось открыть изображение: "] = "Could not open image: ",
+        ["Не удалось передать файл в ScreenDraw. Повторите открытие."] = "Could not send the file to ScreenDraw. Please try opening it again.",
         // settings window
         ["Копировать в буфер при сохранении"] = "Copy to clipboard when saving",
         ["Закрывать редактор после сохранения/копирования"] = "Close the editor after saving/copying",

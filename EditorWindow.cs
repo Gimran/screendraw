@@ -343,7 +343,8 @@ sealed class EditorWindow : Window
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 8, 0) };
         foreach (var (text, tip, act) in new (string, string, Action)[] {
             (Loc.T("Копировать"), "Ctrl+C", Copy), (Loc.T("Копировать путь"), Loc.T("Ctrl+Shift+C — путь к файлу в папке сохранения (файл создаётся, если ещё не сохранён)"), CopyPath),
-            (Loc.T("Сохранить"), "Ctrl+S", Save), (Loc.T("Сохранить как…"), "Ctrl+Shift+S", SaveAs) })
+            (Loc.T("Сохранить"), "Ctrl+S", Save), (Loc.T("Сохранить как…"), "Ctrl+Shift+S", SaveAs),
+            (Loc.T("Открыть файл…"), "Ctrl+O", () => ImageDocuments.Choose(cfg, this)) })
         {
             var b = new Button { Content = text, ToolTip = tip, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(6, 6, 0, 6), Focusable = false };
             if (copyBtn == null) copyBtn = b;
@@ -700,6 +701,12 @@ sealed class EditorWindow : Window
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
+        if (e.Key == Key.O && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            e.Handled = true;
+            ImageDocuments.Choose(cfg, this);
+            return;
+        }
         if (Keyboard.FocusedElement is TextBox) return;
         bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control), shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
         e.Handled = true;

@@ -24,7 +24,15 @@ static class Program
         {
             try { first = mutex.WaitOne(8000); } catch (AbandonedMutexException) { first = true; }
         }
-        if (!first) return;
+        string[] files;
+        try { files = ImageInput.Paths(args); }
+        catch (Exception ex) { MessageBox.Show(ex.Message, "ScreenDraw"); return; }
+        if (!first)
+        {
+            if (files.Length > 0 && !InstanceFiles.Send(InstanceFiles.Name, files).GetAwaiter().GetResult())
+                MessageBox.Show(Loc.T("Не удалось передать файл в ScreenDraw. Повторите открытие."), "ScreenDraw", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         CrashLog.Install();
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, ThemeMode = ThemeMode.Dark };
         Controller ctl;
@@ -36,10 +44,26 @@ static class Program
             if (!args.Contains("--retried"))
             {
                 Thread.Sleep(4000);
-                try { System.Diagnostics.Process.Start(Environment.ProcessPath!, "--restarted --retried"); } catch { }
+                try
+                {
+                    var retry = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!);
+                    foreach (string arg in args) retry.ArgumentList.Add(arg);
+                    if (!args.Contains("--restarted")) retry.ArgumentList.Add("--restarted");
+                    retry.ArgumentList.Add("--retried");
+                    System.Diagnostics.Process.Start(retry);
+                }
+                catch { }
             }
             return;
         }
+        using var incomingFiles = new InstanceFiles(InstanceFiles.Name,
+            paths => app.Dispatcher.BeginInvoke(new Action(() => ImageDocuments.Open(paths, ctl.Settings))));
+        if (!args.Any(a => a.StartsWith("--test-", StringComparison.Ordinal)))
+        {
+            try { ShellIntegration.Register(); }
+            catch (Exception ex) { CrashLog.Write("Open With registration failed", ex); }
+        }
+        if (files.Length > 0) app.Dispatcher.BeginInvoke(new Action(() => ImageDocuments.Open(files, ctl.Settings)));
         // an error in some event handler must not kill the tray app: log it and carry on
         app.DispatcherUnhandledException += (_, e) =>
         {
@@ -78,6 +102,7 @@ sealed class Controller : IDisposable
 
     readonly Application app;
     readonly Config cfg = Config.Load();
+    public Config Settings => cfg;
     readonly Forms.NotifyIcon tray;
     readonly HwndSource msgWindow;
     readonly List<SelectionWindow> overlays = new();
@@ -92,6 +117,7 @@ sealed class Controller : IDisposable
 
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add(Loc.T("Сделать скриншот"), null, (_, _) => Capture());
+        menu.Items.Add(Loc.T("Открыть файл…"), null, (_, _) => ImageDocuments.Choose(cfg));
         menu.Items.Add(Loc.T("Настройки…"), null, (_, _) => ShowSettings());
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(Loc.T("Выход"), null, (_, _) => app.Shutdown());
