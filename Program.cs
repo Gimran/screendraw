@@ -124,7 +124,7 @@ sealed class Controller : IDisposable
         tray = new Forms.NotifyIcon { Icon = MakeIcon(), ContextMenuStrip = menu, Visible = true };
         tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) Capture(); };
 
-        ApplyHotkey(announce: true);
+        ApplyHotkey();
     }
 
     static Drawing.Icon MakeIcon()
@@ -143,7 +143,7 @@ sealed class Controller : IDisposable
         return IntPtr.Zero;
     }
 
-    void ApplyHotkey(bool announce = false)
+    void ApplyHotkey()
     {
         UnregisterHotKey(msgWindow.Handle, HotkeyId);
         hotkeyOk = HotkeyText.TryParse(cfg.Hotkey, out var mods, out var vk)
@@ -152,8 +152,6 @@ sealed class Controller : IDisposable
         tray.Text = $"ScreenDraw ({cfg.Hotkey})";
         if (!hotkeyOk)
             tray.ShowBalloonTip(5000, "ScreenDraw", Loc.F("Не удалось занять {0} — сочетание занято другой программой (код {1}). Выберите другое в настройках.", cfg.Hotkey, err), Forms.ToolTipIcon.Warning);
-        else if (announce)
-            tray.ShowBalloonTip(2000, "ScreenDraw", Loc.F("Запущено. Скриншот: {0}", cfg.Hotkey), Forms.ToolTipIcon.Info);
     }
 
     void ShowSettings()
